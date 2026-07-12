@@ -34,7 +34,7 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Segoe UI', system-ui, sans-serif;
-    background: var(--surface);
+    background: #111;
     color: var(--ink);
     min-height: 100vh;
   }
@@ -282,7 +282,7 @@
 
 <header>
   <div class="logo-area">
-    <h1>Enforcement Analytics</h1>
+    <h1 style="cursor:pointer" onclick="location.reload()">Enforcement Analytics</h1>
     <p>Motor Vehicle Inspection &amp; Collection Dashboard</p>
   </div>
   <span id="period-badge"></span>
@@ -365,18 +365,7 @@ let allMonths   = [];
 let currentMode = 'month';
 let chartInstances = {};
 
-const OFFICER_META = {
-  'A BHAGYASREE':          { desig: 'AMVI', target: 1138000 },
-  'M UDAY KUMAR NAIDU':    { desig: 'AMVI', target: 1138000 },
-  'RAJESH BETHU':          { desig: 'AMVI', target: 1138000 },
-  'DSM VARA PRASAD':       { desig: 'MVI',  target: 1138000 },
-  'SWATHI R':              { desig: 'MVI',  target: 1138000 },
-  'U JAYASRI YADAV':       { desig: 'MVI',  target: 1138000 },
-  'K RANI':                { desig: 'MVI',  target: 1138000 },
-  'B VENKATA RAMANA NAIK': { desig: 'AMVI', target: 1138000 },
-  'C V RAMANA':            { desig: 'AMVI', target: 1138000 },
-  'S SIVA SANKAR':         { desig: 'AMVI', target: 1138000 },
-};
+let OFFICER_META = {};
 
 // ══════════════════════════════════════════════════════════════
 // HELPERS
@@ -441,18 +430,34 @@ function showToast(msg) {
 // AUTO-LOAD EXCEL
 // ══════════════════════════════════════════════════════════════
 const EXCEL_FILE = '2026-27_Year data_repots.xlsx';
+const TARGET_FILE = 'Target_fixed.xlsx';
 
 window.addEventListener('DOMContentLoaded', () => {
   showLoader(true);
-  fetch(EXCEL_FILE)
-    .then(resp => {
-      if (!resp.ok) throw new Error('File not found');
-      return resp.arrayBuffer();
-    })
-    .then(data => {
-      const wb   = XLSX.read(data, { type: 'array', cellDates: true });
-      const ws   = wb.Sheets[wb.SheetNames[0]];
-      const json = XLSX.utils.sheet_to_json(ws, { raw: false, dateNF: 'yyyy-mm-dd' });
+
+  Promise.allSettled([
+    fetch(EXCEL_FILE).then(r => r.arrayBuffer()),
+    fetch(TARGET_FILE).then(r => r.arrayBuffer()),
+  ]).then(([dataRes, targetRes]) => {
+    if (dataRes.status !== 'rejected') {
+      const dataBuf = dataRes.value;
+      const wbData = XLSX.read(dataBuf, { type: 'array', cellDates: true });
+
+      if (targetRes.status === 'fulfilled') {
+        const wbTgt = XLSX.read(targetRes.value, { type: 'array' });
+        const tgtJson = XLSX.utils.sheet_to_json(wbTgt.Sheets[wbTgt.SheetNames[0]], { raw: false });
+        tgtJson.forEach(r => {
+          const name = (r['Officer Name'] || r['Name'] || '').toString().trim().toUpperCase();
+          if (!name) return;
+          OFFICER_META[name] = {
+            desig:  (r['Designation'] || r['Desig'] || '').toString(),
+            target: parseFloat(String(r['Target'] || r['Amount'] || '0').replace(/,/g, '')) || 0,
+          };
+        });
+      }
+
+    const ws   = wbData.Sheets[wbData.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(ws, { raw: false, dateNF: 'yyyy-mm-dd' });
 
       rawData = json.map(r => ({
         challanNo:   r['Challan Number']         || '',
@@ -477,10 +482,10 @@ window.addEventListener('DOMContentLoaded', () => {
 
       renderView();
       showToast(`Loaded ${rawData.length.toLocaleString()} records across ${allMonths.length} month(s)`);
+    }
     })
     .catch(() => {
-      showToast('Could not load Excel file. Place it in the same folder as this HTML.');
-      console.warn('Auto-load failed:', EXCEL_FILE);
+      showToast('Could not load files. Place them in the same folder as this HTML.');
     })
     .finally(() => showLoader(false));
 });
@@ -513,23 +518,25 @@ function aggregateOfficers(subset) {
   const map = {};
   for (const r of subset) {
     const k = r.officer;
-    if (!k || !OFFICER_META[k]) continue;
+    if (!k) continue;
     if (!map[k]) map[k] = { name: k, cash: 0, arrears: 0, pending: 0,
-      cashAmt: 0, arrearsAmt: 0, pendingAmt: 0, totalAmt: 0, rows: [] };
+      cashAmt: 0, arrearsAmt: 0, pendingAmt: 0, totalAmt: 0, rows: [], sources: {} };
     if (r.status === 'Cash')    { map[k].cash++;    map[k].cashAmt    += r.amount; }
     if (r.status === 'Arrears') { map[k].arrears++; map[k].arrearsAmt += r.amount; }
     if (r.status === 'Pending') { map[k].pending++; map[k].pendingAmt += r.amount; }
     map[k].rows.push(r);
+    const src = r.source || 'Unknown';
+    map[k].sources[src] = (map[k].sources[src] || 0) + 1;
   }
 
   const nMonths = currentMode === 'year' ? allMonths.length : 1;
 
   return Object.values(map).map(o => {
-    const meta    = OFFICER_META[o.name];
+    const meta    = OFFICER_META[o.name] || { desig: '', target: 0 };
     const target  = meta.target * nMonths;
     const total   = o.cashAmt + o.arrearsAmt;
     const pct     = target > 0 ? Math.round(total / target * 100 * 100) / 100 : 0;
-    return { ...o, desig: meta.desig, target, total, pct };
+    return { ...o, desig: meta.desig || 'N/A', target, total, pct };
   }).sort((a,b) => b.pct - a.pct)
     .map((o, i) => ({ ...o, rank: i + 1 }));
 }
@@ -632,16 +639,17 @@ function renderOfficerCards(officers) {
     return;
   }
   document.getElementById('officers-grid').innerHTML = officers.map(o => {
-    const c   = pctColour(o.pct);
+    const c   = o.target > 0 ? pctColour(o.pct) : { bg: '#f1f5f9', fg: '#475569', bar: '#94a3b8' };
     const rk  = o.rank <= 3 ? `rank-${o.rank}` : 'rank-other';
     const pct = Math.min(o.pct, 100);
+    const pctText = o.target > 0 ? `${o.pct}% — ${pctLabel(o.pct)}` : 'No Target';
     return `
       <div class="officer-card" onclick="showOfficerDetail('${o.name}')">
         <div class="officer-rank ${rk}">#${o.rank}</div>
         <div class="officer-name">${o.name}</div>
         <div class="officer-desig">${o.desig}</div>
         <span class="pill pct-badge" style="background:${c.bg};color:${c.fg}">
-          ${o.pct}% — ${pctLabel(o.pct)}
+          ${pctText}
         </span>
         <div class="officer-pct-bar">
           <div class="officer-pct-fill" style="width:${pct}%;background:${c.bar}"></div>
@@ -691,13 +699,13 @@ function renderTeamCharts(officers, subset) {
     data: {
       labels: officers.map(o => o.name.split(' ').slice(-1)[0]),
       datasets: [
-        { label: 'Cash',    data: officers.map(o => o.cashAmt),    backgroundColor: '#0d9488', borderRadius: 4 },
+        { label: 'Cash',    data: officers.map(o => o.cashAmt),    backgroundColor: '#0d9488', borderRadius: 6 },
         { label: 'Arrears', data: officers.map(o => o.arrearsAmt), backgroundColor: '#f59e0b', borderRadius: 4 },
       ]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'top', labels: { font: { size: 11 } } } },
+      plugins: { legend: { position: 'top', labels: { font: { size: 11 }, color: '#c8cad8' } } },
       scales: {
         x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } },
         y: { stacked: true, grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 }, callback: v => `₹${(v/1e5).toFixed(1)}L` } }
@@ -730,7 +738,7 @@ function renderTeamCharts(officers, subset) {
 
   destroyChart('tc-trend');
   const trendData = allMonths.map(mon => {
-    const rows = rawData.filter(r => r.monYear === mon && OFFICER_META[r.officer]);
+    const rows = rawData.filter(r => r.monYear === mon);
     return {
       mon,
       cash:    rows.filter(r=>r.status==='Cash').reduce((s,r)=>s+r.amount,0),
@@ -738,7 +746,7 @@ function renderTeamCharts(officers, subset) {
     };
   });
   const totals     = trendData.map(d => d.cash + d.arrears);
-  const totalTgt   = Object.values(OFFICER_META).reduce((s,m)=>s+m.target,0);
+  const totalTgt = 6828000;
 
   chartInstances['tc-trend'] = new Chart(document.getElementById('tc-trend'), {
     type: 'bar',
@@ -753,10 +761,10 @@ function renderTeamCharts(officers, subset) {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position:'top', labels:{ font:{size:11} } } },
+      plugins: { legend: { position:'top', labels:{ font:{size:11}, color:'#475569' } } },
       scales: {
-        x: { grid:{display:false}, ticks:{font:{size:10}} },
-        y: { grid:{color:'#f1f5f9'}, ticks:{font:{size:10}, callback:v=>`₹${(v/1e5).toFixed(1)}L`} }
+        x: { grid:{display:false}, ticks:{font:{size:10}, color:'#a1a5bd'} },
+        y: { grid:{color:'rgba(58,61,82,.6)'}, ticks:{font:{size:10}, color:'#a1a5bd', callback:v=>`₹${(v/1e5).toFixed(1)}L`} }
       }
     }
   });
@@ -775,13 +783,13 @@ function showOfficerDetail(officerKey) {
   const o        = officers.find(x => x.name === officerKey);
   if (!o) return;
 
-  const c = pctColour(o.pct);
+  const c = o.target > 0 ? pctColour(o.pct) : { bg: '#f1f5f9', fg: '#475569', bar: '#94a3b8' };
 
   document.getElementById('d-avatar').textContent = initials(o.name);
   document.getElementById('d-name').textContent = o.name;
-  document.getElementById('d-meta').textContent = `${o.desig}  ·  Rank #${o.rank}  ·  ${pctLabel(o.pct)}`;
+  document.getElementById('d-meta').textContent = `${o.desig}  ·  Rank #${o.rank}  ·  ${o.target > 0 ? pctLabel(o.pct) : 'No Target Set'}`;
   const pctEl = document.getElementById('d-pct');
-  pctEl.textContent = o.pct + '%';
+  pctEl.textContent = o.target > 0 ? o.pct + '%' : '—';
   pctEl.style.color = c.bar;
 
   // Correction: Officer level total active unique days explicitly filtered for Cash and Pending cases
@@ -798,7 +806,7 @@ function showOfficerDetail(officerKey) {
   document.getElementById('d-kpis').innerHTML = `
     <div class="detail-kpi">
       <div class="detail-kpi-lbl">Target</div>
-      <div class="detail-kpi-val">Rs. ${indianFmt(o.target)}</div>
+      <div class="detail-kpi-val">${o.target > 0 ? 'Rs. ' + indianFmt(o.target) : 'Not Set'}</div>
     </div>
     <div class="detail-kpi">
       <div class="detail-kpi-lbl">Cash Collected</div>
@@ -828,6 +836,10 @@ function showOfficerDetail(officerKey) {
       <div class="detail-kpi-lbl">Active Days (Cash/Pend)</div>
       <div class="detail-kpi-val">${activeDays}</div>
     </div>
+    <div class="detail-kpi">
+      <div class="detail-kpi-lbl">Challan Source (Cash + Pending)</div>
+      <div class="detail-kpi-val">${Object.entries(o.rows.filter(r => r.status === 'Cash' || r.status === 'Pending').reduce((m, r) => { m[r.source] = (m[r.source] || 0) + 1; return m; }, {})).map(([s,n]) => `${s}: ${n}`).join(' &middot; ') || '—'}</div>
+    </div>
   `;
 
   destroyChart('d-chart-bar');
@@ -845,8 +857,8 @@ function showOfficerDetail(officerKey) {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { grid:{display:false}, ticks:{font:{size:11}} },
-        y: { grid:{color:'#f1f5f9'}, ticks:{font:{size:10}} }
+        x: { grid:{display:false}, ticks:{font:{size:11}, color:'#8b8fa8'} },
+        y: { grid:{color:'rgba(42,45,62,.5)'}, ticks:{font:{size:10}, color:'#8b8fa8'} }
       }
     }
   });
@@ -866,7 +878,7 @@ function showOfficerDetail(officerKey) {
       responsive: true, maintainAspectRatio: false,
       cutout: '62%',
       plugins: {
-        legend: { position: 'bottom', labels: { font:{size:11}, padding:14 } },
+        legend: { position: 'bottom', labels: { font:{size:11}, padding:14, color:'#475569' } },
         tooltip: { callbacks: { label: ctx => ` Rs. ${indianFmt(ctx.raw)}` } }
       }
     }
@@ -874,7 +886,7 @@ function showOfficerDetail(officerKey) {
 
   const trend = buildTrend(officerKey);
   const selMon = document.getElementById('month-select').value;
-  const tgtPerMon = OFFICER_META[officerKey]?.target || 1138000;
+  const tgtPerMon = 1138000;
 
   destroyChart('d-chart-trend');
   chartInstances['d-chart-trend'] = new Chart(document.getElementById('d-chart-trend'), {
@@ -892,8 +904,8 @@ function showOfficerDetail(officerKey) {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { position:'top', labels:{font:{size:11}} } },
       scales: {
-        x: { grid:{display:false}, ticks:{font:{size:10}} },
-        y: { grid:{color:'#f1f5f9'}, ticks:{font:{size:10}, callback:v=>`₹${(v/1e5).toFixed(1)}L`} }
+        x: { grid:{display:false}, ticks:{font:{size:10}, color:'#a1a5bd'} },
+        y: { grid:{color:'rgba(58,61,82,.6)'}, ticks:{font:{size:10}, color:'#a1a5bd', callback:v=>`₹${(v/1e5).toFixed(1)}L`} }
       }
     }
   });
