@@ -649,7 +649,7 @@ function renderOfficerCards(officers) {
     const pct = Math.min(o.pct, 100);
     const pctText = o.target > 0 ? `${o.pct}% — ${pctLabel(o.pct)}` : 'No Target';
     return `
-      <div class="officer-card" onclick="showOfficerDetail('${o.name}')">
+      <div class="officer-card" style="${!o.target ? 'background:#2d343b;border-color:#3d444d;opacity:.6;' : ''}" onclick="showOfficerDetail('${o.name}')">
         <div class="officer-rank ${rk}">#${o.rank}</div>
         <div class="officer-name">${o.name}</div>
         <div class="officer-desig">${o.desig}</div>
