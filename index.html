@@ -418,6 +418,22 @@ function destroyChart(id) {
   if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
 }
 
+function getMonthlyTarget(name, monYear) {
+  const meta = OFFICER_META[name];
+  if (!meta) return 0;
+  if (meta.monthly && meta.monthly[monYear]) return meta.monthly[monYear];
+  if (meta.flatTarget) return meta.flatTarget;
+  return 0;
+}
+
+function getTeamMonthlyTarget(monYear) {
+  let total = 0;
+  for (const name in OFFICER_META) {
+    total += getMonthlyTarget(name, monYear);
+  }
+  return total;
+}
+
 function showLoader(v) { document.getElementById('loader').style.display = v ? 'flex' : 'none'; }
 
 function showToast(msg) {
@@ -445,15 +461,50 @@ window.addEventListener('DOMContentLoaded', () => {
 
       if (targetRes.status === 'fulfilled') {
         const wbTgt = XLSX.read(targetRes.value, { type: 'array' });
-        const tgtJson = XLSX.utils.sheet_to_json(wbTgt.Sheets[wbTgt.SheetNames[0]], { raw: false });
-        tgtJson.forEach(r => {
-          const name = (r['Officer Name'] || r['Name'] || '').toString().trim().toUpperCase();
-          if (!name) return;
-          OFFICER_META[name] = {
-            desig:  (r['Designation'] || r['Desig'] || '').toString(),
-            target: parseFloat(String(r['Target'] || r['Amount'] || '0').replace(/,/g, '')) || 0,
-          };
-        });
+        const wsTgt = wbTgt.Sheets[wbTgt.SheetNames[0]];
+        const rawRows = XLSX.utils.sheet_to_json(wsTgt, { header: 1, defval: '' });
+        console.log('RAW Target rows:', JSON.stringify(rawRows));
+        if (rawRows.length >= 2) {
+          const headers = rawRows[0].map(h => String(h || '').trim());
+          let nameCol = -1, desigCol = -1;
+          const monthMap = {};
+          headers.forEach((h, idx) => {
+            const hl = h.toLowerCase();
+            if (hl.includes('officer') && hl.includes('name')) nameCol = idx;
+            else if (hl.includes('desig')) desigCol = idx;
+            let monKey = null;
+            const m3 = h.match(/^([A-Za-z]{3})[- ]?(\d{2,4})$/);
+            if (m3) {
+              const mo = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 }[m3[1].toLowerCase()];
+              if (mo) { let yr = parseInt(m3[2]); if (yr < 100) yr += 2000; monKey = `${yr}-${String(mo).padStart(2,'0')}`; }
+            }
+            const m4 = h.match(/^(\d{4})[- ]?(\d{2})$/);
+            if (m4) monKey = `${m4[1]}-${m4[2]}`;
+            if (monKey) monthMap[idx] = monKey;
+          });
+          console.log('nameCol:', nameCol, 'desigCol:', desigCol, 'monthMap:', monthMap);
+          for (let r = 1; r < rawRows.length; r++) {
+            const row = rawRows[r];
+            const name = nameCol >= 0 ? String(row[nameCol] || '').trim().toUpperCase() : '';
+            if (!name) continue;
+            const desig = desigCol >= 0 ? String(row[desigCol] || '').trim() : '';
+            const meta = { desig, monthly: {} };
+            let hasMonthCols = false;
+            for (const [cStr, monKey] of Object.entries(monthMap)) {
+              const val = parseFloat(String(row[parseInt(cStr)] || '0').replace(/,/g, '')) || 0;
+              if (val > 0) { meta.monthly[monKey] = val; hasMonthCols = true; }
+            }
+            if (!hasMonthCols) {
+              const tgtCol = headers.findIndex(h => h.toLowerCase() === 'target');
+              if (tgtCol >= 0) {
+                const val = parseFloat(String(row[tgtCol] || '0').replace(/,/g, '')) || 0;
+                if (val > 0) meta.flatTarget = val;
+              }
+            }
+            OFFICER_META[name] = meta;
+          }
+        }
+        console.log('OFFICER_META:', JSON.stringify(OFFICER_META));
       }
 
     const ws   = wbData.Sheets[wbData.SheetNames[0]];
@@ -530,10 +581,16 @@ function aggregateOfficers(subset) {
   }
 
   const nMonths = currentMode === 'year' ? allMonths.length : 1;
+  const selMon   = currentMode === 'year' ? null : document.getElementById('month-select').value;
 
   return Object.values(map).map(o => {
-    const meta    = OFFICER_META[o.name] || { desig: '', target: 0 };
-    const target  = meta.target * nMonths;
+    const meta    = OFFICER_META[o.name] || { desig: '', monthly: {} };
+    let target = 0;
+    if (currentMode === 'year') {
+      allMonths.forEach(m => { target += getMonthlyTarget(o.name, m); });
+    } else {
+      target = getMonthlyTarget(o.name, selMon);
+    }
     const total   = o.cashAmt + o.arrearsAmt;
     const pct     = target > 0 ? Math.round(total / target * 100 * 100) / 100 : 0;
     return { ...o, desig: meta.desig || 'N/A', target, total, pct };
@@ -754,7 +811,7 @@ function renderTeamCharts(officers, subset) {
     };
   });
   const totals     = trendData.map(d => d.cash + d.arrears);
-  const totalTgt = 6828000;
+  const teamTgts   = allMonths.map(m => getTeamMonthlyTarget(m));
 
   chartInstances['tc-trend'] = new Chart(document.getElementById('tc-trend'), {
     type: 'bar',
@@ -764,7 +821,7 @@ function renderTeamCharts(officers, subset) {
         { label:'Cash',    data: trendData.map(d=>d.cash),    backgroundColor:'#0d9488', hoverBackgroundColor:'#0f766e', stack:'s', borderRadius:4 },
         { label:'Arrears', data: trendData.map(d=>d.arrears), backgroundColor:'#f59e0b', hoverBackgroundColor:'#d97706', stack:'s', borderRadius:4 },
         { label:'Total',   data: totals, type:'line', borderColor:'#1e40af', backgroundColor:'transparent', pointBackgroundColor:'#1e40af', pointRadius:5, borderWidth:2, tension:.3, order:0 },
-        { label:'Target',  data: allMonths.map(()=>totalTgt), type:'line', borderColor:'#f43f5e', borderDash:[6,4], backgroundColor:'transparent', pointRadius:0, borderWidth:1.5, order:0 },
+        { label:'Target',  data: teamTgts, type:'line', borderColor:'#f43f5e', borderDash:[6,4], backgroundColor:'transparent', pointRadius:0, borderWidth:1.5, order:0 },
       ]
     },
     options: {
@@ -902,7 +959,7 @@ function showOfficerDetail(officerKey) {
 
   const trend = buildTrend(officerKey);
   const selMon = document.getElementById('month-select').value;
-  const tgtPerMon = 1138000;
+  const officerTgts = trend.map(d => getMonthlyTarget(officerKey, d.mon));
 
   destroyChart('d-chart-trend');
   chartInstances['d-chart-trend'] = new Chart(document.getElementById('d-chart-trend'), {
@@ -913,7 +970,7 @@ function showOfficerDetail(officerKey) {
         { label:'Cash',    data:trend.map(d=>d.cash),    backgroundColor:'#0d9488', hoverBackgroundColor:'#0f766e', stack:'s', borderRadius:4 },
         { label:'Arrears', data:trend.map(d=>d.arrears), backgroundColor:'#f59e0b', hoverBackgroundColor:'#d97706', stack:'s', borderRadius:4 },
         { label:'Total',   data:trend.map(d=>d.total), type:'line', borderColor:'#1e40af', backgroundColor:'transparent', pointBackgroundColor: trend.map(d=>d.mon===selMon?'#1e40af':'#93c5fd'), pointRadius:5, borderWidth:2, tension:.3, order:0 },
-        { label:'Monthly Target', data:trend.map(()=>tgtPerMon), type:'line', borderColor:'#f43f5e', borderDash:[5,4], backgroundColor:'transparent', pointRadius:0, borderWidth:1.5, order:0 },
+        { label:'Monthly Target', data:officerTgts, type:'line', borderColor:'#f43f5e', borderDash:[5,4], backgroundColor:'transparent', pointRadius:0, borderWidth:1.5, order:0 },
       ]
     },
     options: {
