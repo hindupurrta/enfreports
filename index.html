@@ -356,17 +356,20 @@
       <div class="detail-trend-wrap"><canvas id="d-chart-trend"></canvas></div>
     </div>
     <div class="table-card">
-      <h4>Challan Records</h4>
+      <h4>Date-Wise Collection Flow</h4>
       <div style="overflow-x:auto">
         <table>
           <thead>
             <tr>
-              <th>#</th><th>Challan No.</th><th>Date</th>
-              <th>Vehicle</th><th>Offence</th>
-              <th>Status</th><th style="text-align:right">Amount</th>
+              <th>#</th><th>Date</th>
+              <th style="text-align:right">Cash (₹)</th>
+              <th style="text-align:right">Arrears (₹)</th>
+              <th style="text-align:right">Total Collected (₹)</th>
+              <th style="text-align:right">Pending (₹)</th>
+              <th style="text-align:center">Challans</th>
             </tr>
           </thead>
-          <tbody id="d-table-body"></tbody>
+          <tbody id="d-datewise-body"></tbody>
         </table>
       </div>
     </div>
@@ -395,6 +398,12 @@ function indianFmt(n) {
   let res = s.slice(-3); s = s.slice(0, -3);
   while (s.length) { res = s.slice(-2) + ',' + res; s = s.slice(0, -2); }
   return (neg ? '-' : '') + res;
+}
+
+function shortIndianFmt(v) {
+  if (v >= 100000) return `₹${(v/1e5).toFixed(1)}L`;
+  if (v >= 1000) return `₹${(v/1e3).toFixed(0)}k`;
+  return `₹${v}`;
 }
 
 function pctColour(pct) {
@@ -461,6 +470,11 @@ function initials(name) {
 
 function formatDate(d) {
   if (!d) return '—';
+  if (typeof d === 'string' && d.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    const [yr, mo, da] = d.split('-');
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${da}-${months[parseInt(mo, 10) - 1]}-${yr}`;
+  }
   const dt = new Date(d);
   if (isNaN(dt)) return String(d).slice(0,10);
   return dt.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
@@ -472,7 +486,10 @@ function getCleanISODate(rawDateVal) {
   if (isNaN(d.getTime())) {
     return String(rawDateVal).trim().slice(0, 10);
   }
-  return d.toISOString().split('T')[0];
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return `${yr}-${mo}-${da}`;
 }
 
 function destroyChart(id) {
@@ -633,9 +650,10 @@ function aggregateOfficers(subset) {
     if (!k) continue;
     if (!map[k]) map[k] = { name: k, cash: 0, arrears: 0, pending: 0,
       cashAmt: 0, arrearsAmt: 0, pendingAmt: 0, totalAmt: 0, rows: [], sources: {} };
-    if (r.status === 'Cash')    { map[k].cash++;    map[k].cashAmt    += r.amount; }
-    if (r.status === 'Arrears') { map[k].arrears++; map[k].arrearsAmt += r.amount; }
-    if (r.status === 'Pending') { map[k].pending++; map[k].pendingAmt += r.amount; }
+    const status = (r.status || '').toLowerCase();
+    if (status === 'cash')    { map[k].cash++;    map[k].cashAmt    += r.amount; }
+    if (status === 'arrears') { map[k].arrears++; map[k].arrearsAmt += r.amount; }
+    if (status === 'pending') { map[k].pending++; map[k].pendingAmt += r.amount; }
     map[k].rows.push(r);
     const src = r.source || 'Unknown';
     map[k].sources[src] = (map[k].sources[src] || 0) + 1;
@@ -705,7 +723,10 @@ function renderKPIs(officers, subset) {
   // Correction: Extract Active Days safely ONLY from Cash and Pending states
   const activeDays = new Set(
     subset
-      .filter(r => r.status === 'Cash' || r.status === 'Pending')
+      .filter(r => {
+        const s = (r.status || '').toLowerCase();
+        return s === 'cash' || s === 'pending';
+      })
       .map(r => getCleanISODate(r.challanDate))
       .filter(Boolean)
   ).size;
@@ -867,7 +888,7 @@ function renderTeamCharts(officers, subset) {
       plugins: { legend: { position: 'top', labels: { font: { size: 11, family: 'Inter' }, color: '#a1a1aa', padding: 16 } } },
       scales: {
         x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10, family: 'Inter' }, color: '#71717a' } },
-        y: { stacked: true, grid: { color: 'rgba(255,255,255,.06)' }, ticks: { font: { size: 10, family: 'Inter' }, color: '#71717a', callback: v => `₹${(v/1e5).toFixed(1)}L` } }
+        y: { stacked: true, grid: { color: 'rgba(255,255,255,.06)' }, ticks: { font: { size: 10, family: 'Inter' }, color: '#71717a', callback: v => shortIndianFmt(v) } }
       }
     }
   });
@@ -926,7 +947,7 @@ function renderTeamCharts(officers, subset) {
       plugins: { legend: { position:'top', labels:{ font:{size:11, family:'Inter'}, color:'#a1a1aa', padding:16 } } },
       scales: {
         x: { grid:{display:false}, ticks:{font:{size:10, family:'Inter'}, color:'#71717a'} },
-        y: { grid:{color:'rgba(255,255,255,.06)'}, ticks:{font:{size:10, family:'Inter'}, color:'#71717a', callback:v=>`₹${(v/1e5).toFixed(1)}L`} }
+        y: { grid:{color:'rgba(255,255,255,.06)'}, ticks:{font:{size:10, family:'Inter'}, color:'#71717a', callback: v => shortIndianFmt(v)} }
       }
     }
   });
@@ -1075,24 +1096,42 @@ function showOfficerDetail(officerKey) {
       plugins: { legend: { position:'top', labels:{font:{size:11, family:'Inter'}, color:'#a1a1aa'} } },
       scales: {
         x: { grid:{display:false}, ticks:{font:{size:10, family:'Inter'}, color:'#71717a'} },
-        y: { grid:{color:'rgba(255,255,255,.06)'}, ticks:{font:{size:10, family:'Inter'}, color:'#71717a', callback:v=>`₹${(v/1e5).toFixed(1)}L`} }
+        y: { grid:{color:'rgba(255,255,255,.06)'}, ticks:{font:{size:10, family:'Inter'}, color:'#71717a', callback: v => shortIndianFmt(v)} }
       }
     }
   });
 
-  const rows = o.rows.slice().sort((a,b) => new Date(b.challanDate) - new Date(a.challanDate));
-  document.getElementById('d-table-body').innerHTML = rows.length
-    ? rows.map((r,i) => `
+  // ── Date-Wise Collection Flow Table ──
+  const dateMap = {};
+  for (const r of o.rows) {
+    const dk = getCleanISODate(r.challanDate);
+    if (!dk) continue;
+    if (!dateMap[dk]) dateMap[dk] = { cash: 0, arrears: 0, pending: 0, count: 0 };
+    const status = (r.status || '').toLowerCase();
+    if (status === 'cash')    dateMap[dk].cash    += r.amount;
+    if (status === 'arrears') dateMap[dk].arrears += r.amount;
+    if (status === 'pending') dateMap[dk].pending += r.amount;
+    dateMap[dk].count++;
+  }
+
+  // Sort reverse chronological: Newest dates first
+  const dateRows = Object.entries(dateMap)
+    .sort(([a],[b]) => b.localeCompare(a))
+    .map(([date, v]) => ({ date, ...v, collected: v.cash + v.arrears }));
+
+  document.getElementById('d-datewise-body').innerHTML = dateRows.length
+    ? dateRows.map((dr, i) => `
         <tr>
           <td>${i+1}</td>
-          <td style="font-family:monospace;font-size:.78rem">${r.challanNo}</td>
-          <td>${formatDate(r.challanDate)}</td>
-          <td><b>${r.vehicle}</b></td>
-          <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.offence}">${r.offence || '—'}</td>
-          <td><span class="pill pill-${r.status.toLowerCase()}">${r.status}</span></td>
-          <td style="text-align:right;font-weight:700">Rs. ${indianFmt(r.amount)}</td>
+          <td>${formatDate(dr.date)}</td>
+          <td style="text-align:right" class="c-green">Rs. ${indianFmt(dr.cash)}</td>
+          <td style="text-align:right" class="c-amber">Rs. ${indianFmt(dr.arrears)}</td>
+          <td style="text-align:right;font-weight:700" class="c-teal">Rs. ${indianFmt(dr.collected)}</td>
+          <td style="text-align:right" class="c-red">Rs. ${indianFmt(dr.pending)}</td>
+          <td style="text-align:center">${dr.count}</td>
         </tr>`).join('')
     : '<tr><td colspan="7" style="text-align:center;padding:24px;color:#94a3b8">No records found</td></tr>';
+
 
   document.getElementById('officer-detail').scrollIntoView({ behavior: 'smooth' });
 }
