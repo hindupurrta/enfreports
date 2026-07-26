@@ -876,7 +876,7 @@ function renderTeamCharts(officers, subset) {
   chartInstances['tc-bar'] = new Chart(document.getElementById('tc-bar'), {
     type: 'bar',
     data: {
-      labels: officers.map(o => o.name.split(' ').slice(-1)[0]),
+      labels: officers.map(o => o.name),
       datasets: [
         { label: 'Cash',    data: officers.map(o => o.cashAmt),    backgroundColor: '#0ea5e9', borderRadius: 6, hoverBackgroundColor: '#38bdf8' },
         { label: 'Arrears', data: officers.map(o => o.arrearsAmt), backgroundColor: '#fbbf24', borderRadius: 4, hoverBackgroundColor: '#fcd34d' },
@@ -897,7 +897,7 @@ function renderTeamCharts(officers, subset) {
   chartInstances['tc-pct'] = new Chart(document.getElementById('tc-pct'), {
     type: 'bar',
     data: {
-      labels: officers.map(o => o.name.split(' ').slice(-1)[0]),
+      labels: officers.map(o => o.name),
       datasets: [{
         label: 'Achievement %',
         data: officers.map(o => o.pct),
