@@ -1,0 +1,1202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Enforcement Analytics Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  /* ── TOKENS ─────────────────────────────────────────────────────────── */
+  :root {
+    --bg-base:  #09090b;
+    --bg-card:  #18181b;
+    --text-primary: #f4f4f5;
+    --text-muted:   #a1a1aa;
+    --accent:       #0ea5e9;
+    --accent-hover: #0284c7;
+    --border:   #27272a;
+    --red:      #f43f5e;
+    --green:    #22c55e;
+    --amber:    #fbbf24;
+    --radius:   12px;
+    --shadow:   0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  }
+
+  /* ── RESET ───────────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+
+  /* ── HEADER ──────────────────────────────────────────────────────────── */
+  header {
+    background: var(--bg-card);
+    padding: 24px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--border);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo-area h1 {
+    font-size: 1.5rem; font-weight: 800; letter-spacing: -.02em;
+    color: var(--text-primary);
+  }
+  .logo-area p { font-size: .85rem; color: var(--text-muted); margin-top: 4px; }
+  #period-badge {
+    background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
+    color: #fff; font-size: .78rem; padding: 5px 14px; border-radius: 20px;
+    display: none;
+  }
+
+  /* ── MAIN DASHBOARD ──────────────────────────────────────────────────── */
+  /* (defined near the bottom of this block for specificity) */
+
+  /* ── CONTROLS BAR ────────────────────────────────────────────────────── */
+  .controls-bar {
+    display: flex; align-items: center; gap: 20px;
+    background: var(--bg-card); border-radius: var(--radius);
+    padding: 20px; margin-bottom: 32px;
+    border: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .controls-bar label { font-size: .85rem; font-weight: 600; color: var(--text-muted); }
+  .controls-bar select {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 16px; font-size: .9rem; color: var(--text-primary);
+    background: var(--bg-base); cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a1a1aa' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 14px center;
+    padding-right: 40px;
+  }
+  .controls-bar select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .mode-toggle { display: flex; gap: 4px; background: var(--bg-base); border-radius: 8px; padding: 4px; }
+  .mode-btn {
+    padding: 8px 20px; border-radius: 6px; border: none; cursor: pointer;
+    font-size: .85rem; font-weight: 600; color: var(--text-muted);
+    background: transparent; transition: all .2s;
+  }
+  .mode-btn.active { background: var(--border); color: var(--text-primary); }
+  .btn-back {
+    margin-left: auto; background: transparent; border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 20px; font-size: .85rem; font-weight: 600;
+    color: var(--text-muted); cursor: pointer; display: none; transition: all .2s;
+  }
+  .btn-back:hover { background: var(--border); color: var(--text-primary); }
+
+  /* ── KPI STRIP ───────────────────────────────────────────────────────── */
+  .kpi-strip {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 16px; margin-bottom: 28px;
+  }
+  .kpi-card {
+    background: var(--bg-card); border-radius: var(--radius);
+    padding: 22px 24px;
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--accent);
+    transition: transform .2s, border-color .2s;
+  }
+  .kpi-card:hover { transform: translateY(-3px); border-color: var(--accent); }
+  .kpi-label { font-size: .72rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
+  .kpi-value { font-size: 1.5rem; font-weight: 800; color: var(--text-primary); line-height: 1; }
+  .kpi-sub { font-size: .75rem; color: var(--text-muted); margin-top: 6px; }
+
+  /* ── OFFICER GRID ────────────────────────────────────────────────────── */
+  #officers-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px; margin-bottom: 32px;
+  }
+  .officer-card {
+    background: var(--bg-card); border-radius: var(--radius);
+    border: 1px solid var(--border); padding: 24px;
+    cursor: pointer; transition: all .2s;
+    position: relative; overflow: hidden;
+  }
+  .officer-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(0,0,0,.3);
+  }
+  .officer-rank {
+    position: absolute; top: 16px; right: 16px;
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .72rem; font-weight: 800; color: #fff;
+  }
+  .rank-1 { background: #f59e0b; }
+  .rank-2 { background: #71717a; }
+  .rank-3 { background: #b45309; }
+  .rank-other { background: #3f3f46; }
+  .officer-name { font-size: 1rem; font-weight: 700; margin-bottom: 4px; padding-right: 40px; color: var(--text-primary); }
+  .officer-desig { font-size: .72rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 16px; }
+  .officer-pct-bar { height: 5px; background: var(--border); border-radius: 99px; margin-bottom: 14px; overflow: hidden; }
+  .officer-pct-fill { height: 100%; border-radius: 99px; transition: width .6s ease; }
+  .officer-stats { display: flex; justify-content: space-between; }
+  .officer-stat-item { text-align: center; }
+  .officer-stat-val { font-size: .9rem; font-weight: 700; }
+  .officer-stat-lbl { font-size: .65rem; color: var(--text-muted); margin-top: 2px; }
+  .pct-badge {
+    display: inline-block; font-size: .72rem; font-weight: 700;
+    padding: 3px 10px; border-radius: 99px; margin-bottom: 12px;
+    letter-spacing: .04em;
+  }
+
+  /* ── TEAM CHARTS ROW ──────────────────────────────────────────────────── */
+  .charts-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px;
+  }
+  @media (max-width: 900px) { .charts-row { grid-template-columns: 1fr; } }
+  .chart-card {
+    background: var(--bg-card); border-radius: var(--radius);
+    border: 1px solid var(--border); padding: 24px;
+  }
+  .chart-card h3 { font-size: .78rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 20px; }
+  .chart-wrap { position: relative; height: 240px; }
+
+  /* ── TREND CHART (full width) ─────────────────────────────────────────── */
+  .chart-card.full { grid-column: 1 / -1; }
+  .chart-card.full .chart-wrap { height: 260px; }
+
+  /* ── OFFICER DETAIL PANEL ────────────────────────────────────────────── */
+  #officer-detail { display: none; }
+  .detail-header {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 28px 32px; margin-bottom: 24px;
+    display: flex; align-items: center; gap: 24px;
+  }
+  .detail-avatar {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--accent); display: flex;
+    align-items: center; justify-content: center;
+    font-size: 1.4rem; font-weight: 800; color: #fff; flex-shrink: 0;
+  }
+  .detail-name { font-size: 1.3rem; font-weight: 800; margin-bottom: 4px; color: var(--text-primary); }
+  .detail-meta { font-size: .82rem; color: var(--text-muted); }
+  .detail-pct-large { margin-left: auto; text-align: right; }
+  .detail-pct-large .big-num { font-size: 2.4rem; font-weight: 900; line-height: 1; }
+  .detail-pct-large .big-lbl { font-size: .72rem; color: var(--text-muted); margin-top: 4px; }
+
+  .detail-kpis {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px; margin-bottom: 24px;
+  }
+  .detail-kpi {
+    background: var(--bg-card); border-radius: var(--radius);
+    border: 1px solid var(--border); padding: 18px 20px;
+  }
+  .detail-kpi-lbl { font-size: .68rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+  .detail-kpi-val { font-size: 1.1rem; font-weight: 800; color: var(--text-primary); }
+
+  .detail-charts {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;
+  }
+  @media (max-width: 820px) { .detail-charts { grid-template-columns: 1fr; } }
+  .detail-chart-card {
+    background: var(--bg-card); border-radius: var(--radius);
+    border: 1px solid var(--border); padding: 20px;
+  }
+  .detail-chart-card h4 { font-size: .75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 16px; }
+  .detail-chart-wrap { position: relative; height: 200px; }
+
+  .detail-trend-card {
+    background: var(--bg-card); border-radius: var(--radius);
+    border: 1px solid var(--border); padding: 20px; margin-bottom: 24px;
+  }
+  .detail-trend-card h4 { font-size: .75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 16px; }
+  .detail-trend-wrap { position: relative; height: 200px; }
+
+  /* ── CHALLAN TABLE ────────────────────────────────────────────────────── */
+  .table-card {
+    background: var(--bg-card); border-radius: var(--radius);
+    border: 1px solid var(--border); overflow: hidden;
+  }
+  .table-card h4 {
+    font-size: .75rem; font-weight: 700; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .08em;
+    padding: 18px 20px; border-bottom: 1px solid var(--border);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  thead tr { background: rgba(255,255,255,.03); }
+  th { padding: 12px 16px; text-align: left; font-size: .7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .07em; border-bottom: 1px solid var(--border); }
+  td { padding: 11px 16px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: rgba(255,255,255,.04); }
+
+  /* ── STATUS PILLS ────────────────────────────────────────────────────── */
+  .pill {
+    display: inline-block; padding: 3px 10px; border-radius: 99px;
+    font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .pill-cash    { background: rgba(34,197,94,.15); color: #4ade80; }
+  .pill-pending { background: rgba(244,63,94,.15);  color: #fb7185; }
+  .pill-arrears { background: rgba(251,191,36,.15); color: #fcd34d; }
+
+  /* ── COLOUR HELPERS ──────────────────────────────────────────────────── */
+  .c-green { color: #4ade80; }
+  .c-amber { color: #fbbf24; }
+  .c-red   { color: #f87171; }
+  .c-teal  { color: var(--accent); }
+
+  /* ── PERIOD BADGE ──────────────────────────────────────────────────────── */
+  #period-badge {
+    background: rgba(14,165,233,.15); border: 1px solid rgba(14,165,233,.3);
+    color: var(--accent); font-size: .8rem; font-weight: 600;
+    padding: 6px 16px; border-radius: 99px; display: none;
+    letter-spacing: .03em;
+  }
+
+  /* ── LOADER ──────────────────────────────────────────────────────────── */
+  #loader {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    backdrop-filter: blur(4px);
+    z-index: 999; align-items: center; justify-content: center;
+  }
+  .spinner {
+    width: 44px; height: 44px; border: 3px solid rgba(255,255,255,.1);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── TOAST ────────────────────────────────────────────────────────────── */
+  #toast {
+    position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(80px);
+    background: var(--bg-card); color: var(--text-primary);
+    border: 1px solid var(--border);
+    padding: 12px 24px; border-radius: 10px;
+    font-size: .875rem; font-weight: 500;
+    transition: transform .3s cubic-bezier(.21,1.02,.73,1); z-index: 999;
+    pointer-events: none; box-shadow: 0 8px 32px rgba(0,0,0,.4);
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* ── EMPTY STATE ──────────────────────────────────────────────────────── */
+  .empty {
+    text-align: center; padding: 56px 20px; color: var(--text-muted);
+    font-size: .9rem;
+  }
+
+  /* ── DASHBOARD PADDING ───────────────────────────────────────────────── */
+  #dashboard { padding: 32px 40px; max-width: 1440px; margin: 0 auto; }
+
+  @media (max-width: 700px) {
+    #dashboard { padding: 20px 16px; }
+    header { padding: 18px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-area">
+    <h1 style="cursor:pointer" onclick="location.reload()">⬡ Enforcement Analytics</h1>
+    <p>Motor Vehicle Inspection &amp; Collection Dashboard</p>
+  </div>
+  <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+    <span id="last-updated" style="font-size: 0.75rem; color: var(--text-muted); font-weight: 500;"></span>
+    <span id="period-badge"></span>
+  </div>
+</header>
+
+<div id="loader"><div class="spinner"></div></div>
+
+<div id="toast"></div>
+
+<div id="dashboard">
+
+  <div class="controls-bar">
+    <label>Mode</label>
+    <div class="mode-toggle">
+      <button class="mode-btn active" id="btn-month" onclick="setMode('month')">Month</button>
+      <button class="mode-btn" id="btn-year" onclick="setMode('year')">Full Year</button>
+    </div>
+    <label>Period</label>
+    <select id="month-select" onchange="renderView()"></select>
+    <button class="btn-back" id="btn-back" onclick="showTeamView()">&#8592; All Officers</button>
+  </div>
+
+  <div id="team-view">
+    <div class="kpi-strip" id="kpi-strip"></div>
+    <div class="charts-row" id="team-charts"></div>
+    <div id="officers-grid"></div>
+  </div>
+
+  <div id="officer-detail">
+    <div class="detail-header">
+      <div class="detail-avatar" id="d-avatar"></div>
+      <div>
+        <div class="detail-name" id="d-name"></div>
+        <div class="detail-meta" id="d-meta"></div>
+      </div>
+      <div class="detail-pct-large">
+        <div class="big-num" id="d-pct"></div>
+        <div class="big-lbl">of target</div>
+      </div>
+    </div>
+    <div class="detail-kpis" id="d-kpis"></div>
+    <div class="detail-charts">
+      <div class="detail-chart-card">
+        <h4>Challan Status</h4>
+        <div class="detail-chart-wrap"><canvas id="d-chart-bar"></canvas></div>
+      </div>
+      <div class="detail-chart-card">
+        <h4>Revenue Split</h4>
+        <div class="detail-chart-wrap"><canvas id="d-chart-donut"></canvas></div>
+      </div>
+    </div>
+    <div class="detail-trend-card">
+      <h4>Month-Wise Collection Flow</h4>
+      <div class="detail-trend-wrap"><canvas id="d-chart-trend"></canvas></div>
+    </div>
+    <div class="table-card">
+      <h4>Date-Wise Collection Flow</h4>
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Date</th>
+              <th style="text-align:right">Cash (₹)</th>
+              <th style="text-align:right">Arrears (₹)</th>
+              <th style="text-align:right">Total Collected (₹)</th>
+              <th style="text-align:right">Pending (₹)</th>
+              <th style="text-align:center">Challans</th>
+            </tr>
+          </thead>
+          <tbody id="d-datewise-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════
+let rawData     = [];
+let allMonths   = [];
+let currentMode = 'month';
+let chartInstances = {};
+
+let OFFICER_META = {};
+
+// ══════════════════════════════════════════════════════════════
+// HELPERS
+// ══════════════════════════════════════════════════════════════
+function indianFmt(n) {
+  n = Math.round(Number(n) || 0);
+  const neg = n < 0; n = Math.abs(n);
+  let s = String(n);
+  if (s.length <= 3) return (neg ? '-' : '') + s;
+  let res = s.slice(-3); s = s.slice(0, -3);
+  while (s.length) { res = s.slice(-2) + ',' + res; s = s.slice(0, -2); }
+  return (neg ? '-' : '') + res;
+}
+
+function shortIndianFmt(v) {
+  if (v >= 100000) return `₹${(v/1e5).toFixed(1)}L`;
+  if (v >= 1000) return `₹${(v/1e3).toFixed(0)}k`;
+  return `₹${v}`;
+}
+
+function pctColour(pct) {
+  if (pct >= 100) return { bg: 'rgba(34,197,94,.15)', fg: '#4ade80', bar: '#22c55e' };
+  if (pct >= 75)  return { bg: 'rgba(14,165,233,.15)', fg: '#38bdf8', bar: '#0ea5e9' };
+  if (pct >= 50)  return { bg: 'rgba(251,191,36,.15)', fg: '#fcd34d', bar: '#fbbf24' };
+  return            { bg: 'rgba(244,63,94,.15)', fg: '#fb7185', bar: '#f43f5e' };
+}
+
+function getCardStyle(pct) {
+  if (pct >= 100) {
+    return {
+      cardStyle: 'background: #22c55e; border-color: #4ade80; color: #09090b;',
+      badgeStyle: 'background: rgba(0,0,0,0.12); color: #064e3b;',
+      barBg: 'rgba(0,0,0,0.12)',
+      barFill: '#15803d',
+      metaStyle: 'color: #14532d;',
+      labelStyle: 'color: #14532d;',
+      valStyle: 'color: #09090b;'
+    };
+  } else if (pct >= 75) {
+    return {
+      cardStyle: 'background: #0ea5e9; border-color: #38bdf8; color: #09090b;',
+      badgeStyle: 'background: rgba(0,0,0,0.12); color: #03527a;',
+      barBg: 'rgba(0,0,0,0.12)',
+      barFill: '#0369a1',
+      metaStyle: 'color: #0369a1;',
+      labelStyle: 'color: #0369a1;',
+      valStyle: 'color: #09090b;'
+    };
+  } else if (pct >= 50) {
+    return {
+      cardStyle: 'background: #fbbf24; border-color: #fcd34d; color: #09090b;',
+      badgeStyle: 'background: rgba(0,0,0,0.12); color: #78350f;',
+      barBg: 'rgba(0,0,0,0.12)',
+      barFill: '#b45309',
+      metaStyle: 'color: #78350f;',
+      labelStyle: 'color: #78350f;',
+      valStyle: 'color: #09090b;'
+    };
+  } else {
+    return {
+      cardStyle: 'background: #f43f5e; border-color: #fb7185; color: #ffffff;',
+      badgeStyle: 'background: rgba(255,255,255,0.25); color: #ffffff;',
+      barBg: 'rgba(255,255,255,0.2)',
+      barFill: '#ffffff',
+      metaStyle: 'color: #ffe4e6;',
+      labelStyle: 'color: #ffe4e6;',
+      valStyle: 'color: #ffffff;'
+    };
+  }
+}
+
+function pctLabel(pct) {
+  if (pct >= 100) return 'TARGET ACHIEVED';
+  if (pct >= 75)  return 'ON TRACK';
+  if (pct >= 50)  return 'NEEDS IMPROVEMENT';
+  return 'BELOW TARGET';
+}
+
+function initials(name) {
+  return name.trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+}
+
+function formatDate(d) {
+  if (!d) return '—';
+  if (typeof d === 'string' && d.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    const [yr, mo, da] = d.split('-');
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${da}-${months[parseInt(mo, 10) - 1]}-${yr}`;
+  }
+  const dt = new Date(d);
+  if (isNaN(dt)) return String(d).slice(0,10);
+  return dt.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+}
+
+function getCleanISODate(rawDateVal) {
+  if (!rawDateVal) return null;
+  const d = new Date(rawDateVal);
+  if (isNaN(d.getTime())) {
+    return String(rawDateVal).trim().slice(0, 10);
+  }
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return `${yr}-${mo}-${da}`;
+}
+
+function parseCSVMonthYear(val) {
+  if (!val) return '';
+  const valStr = String(val).trim();
+  if (/^\d{4}-\d{1,2}$/.test(valStr)) { // Handles 2026-5, 2026-05
+    const parts = valStr.split('-');
+    return `${parts[0]}-${parts[1].padStart(2, '0')}`;
+  }
+  const m1 = valStr.match(/^(\d{1,2})[\/\-](\d{4})$/); // Handles 4/2026, 04/2026
+  if (m1) {
+    return `${m1[2]}-${m1[1].padStart(2, '0')}`;
+  }
+  return valStr;
+}
+
+function destroyChart(id) {
+  if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
+}
+
+function getMonthlyTarget(name, monYear) {
+  const meta = OFFICER_META[name];
+  if (!meta) return 0;
+  if (meta.monthly && meta.monthly[monYear]) return meta.monthly[monYear];
+  if (meta.flatTarget) return meta.flatTarget;
+  return 0;
+}
+
+function getTeamMonthlyTarget(monYear) {
+  let total = 0;
+  for (const name in OFFICER_META) {
+    total += getMonthlyTarget(name, monYear);
+  }
+  return total;
+}
+
+function showLoader(v) { document.getElementById('loader').style.display = v ? 'flex' : 'none'; }
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ══════════════════════════════════════════════════════════════
+// AUTO-LOAD EXCEL
+// ══════════════════════════════════════════════════════════════
+// Published-to-web CSV links (CORS-friendly, no auth required)
+const EXCEL_FILE = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS47CQRzJoHVjtMAj0kBgufmx3a7mlBaKp0xbnFMCfDmFr8hN_4BuP2hTvI3iWE270iubboODeSf0wp/pub?gid=0&single=true&output=csv';
+const TARGET_FILE = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS47CQRzJoHVjtMAj0kBgufmx3a7mlBaKp0xbnFMCfDmFr8hN_4BuP2hTvI3iWE270iubboODeSf0wp/pub?gid=1561949657&single=true&output=csv';
+
+window.addEventListener('DOMContentLoaded', () => {
+  showLoader(true);
+
+  Promise.allSettled([
+    fetch(EXCEL_FILE).then(r => r.arrayBuffer()),
+    fetch(TARGET_FILE).then(r => r.arrayBuffer()),
+  ]).then(([dataRes, targetRes]) => {
+    if (dataRes.status !== 'rejected') {
+      const dataBuf = dataRes.value;
+      const wbData = XLSX.read(dataBuf, { type: 'array', raw: true });
+
+      if (targetRes.status === 'fulfilled') {
+        const wbTgt = XLSX.read(targetRes.value, { type: 'array', raw: true });
+        const wsTgt = wbTgt.Sheets[wbTgt.SheetNames[0]];
+        const rawRows = XLSX.utils.sheet_to_json(wsTgt, { header: 1, defval: '' });
+        console.log('RAW Target rows:', JSON.stringify(rawRows));
+        if (rawRows.length >= 2) {
+          const headers = rawRows[0].map(h => String(h || '').trim());
+          let nameCol = -1, desigCol = -1;
+          const monthMap = {};
+          headers.forEach((h, idx) => {
+            const hl = h.toLowerCase();
+            if (hl.includes('officer') && hl.includes('name')) nameCol = idx;
+            else if (hl.includes('desig')) desigCol = idx;
+            let monKey = null;
+            const m3 = h.match(/^([A-Za-z]{3})[- ]?(\d{2,4})$/);
+            if (m3) {
+              const mo = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 }[m3[1].toLowerCase()];
+              if (mo) { let yr = parseInt(m3[2]); if (yr < 100) yr += 2000; monKey = `${yr}-${String(mo).padStart(2,'0')}`; }
+            }
+            const m4 = h.match(/^(\d{4})[- ]?(\d{2})$/);
+            if (m4) monKey = `${m4[1]}-${m4[2]}`;
+            if (monKey) monthMap[idx] = monKey;
+          });
+          console.log('nameCol:', nameCol, 'desigCol:', desigCol, 'monthMap:', monthMap);
+          for (let r = 1; r < rawRows.length; r++) {
+            const row = rawRows[r];
+            const name = nameCol >= 0 ? String(row[nameCol] || '').trim().toUpperCase() : '';
+            if (!name) continue;
+            const desig = desigCol >= 0 ? String(row[desigCol] || '').trim() : '';
+            const meta = { desig, monthly: {} };
+            let hasMonthCols = false;
+            for (const [cStr, monKey] of Object.entries(monthMap)) {
+              const val = parseFloat(String(row[parseInt(cStr)] || '0').replace(/,/g, '')) || 0;
+              if (val > 0) { meta.monthly[monKey] = val; hasMonthCols = true; }
+            }
+            if (!hasMonthCols) {
+              const tgtCol = headers.findIndex(h => h.toLowerCase() === 'target');
+              if (tgtCol >= 0) {
+                const val = parseFloat(String(row[tgtCol] || '0').replace(/,/g, '')) || 0;
+                if (val > 0) meta.flatTarget = val;
+              }
+            }
+            OFFICER_META[name] = meta;
+          }
+        }
+        console.log('OFFICER_META:', JSON.stringify(OFFICER_META));
+      }
+
+    const ws   = wbData.Sheets[wbData.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(ws, { raw: true });
+
+    function parseCSVDate(val) {
+      if (!val) return '';
+      let d;
+      if (val instanceof Date) {
+        d = val;
+      } else {
+        const valStr = String(val).trim();
+        if (valStr.match(/^\d{4}-\d{2}-\d{2}$/)) return valStr;
+        const dm = valStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+        if (dm) {
+          const day = dm[1].padStart(2, '0');
+          const month = dm[2].padStart(2, '0');
+          const year = dm[3];
+          return `${year}-${month}-${day}`;
+        }
+        d = new Date(valStr);
+      }
+      if (d && !isNaN(d.getTime())) {
+        const yr = d.getFullYear();
+        const mo = String(d.getMonth() + 1).padStart(2, '0');
+        const da = String(d.getDate()).padStart(2, '0');
+        return `${yr}-${mo}-${da}`;
+      }
+      return String(val).trim();
+    }
+
+    rawData = json.map(r => {
+      const challanDateParsed = parseCSVDate(r['Challan Date']);
+      return {
+        challanNo:   r['Challan Number']         || '',
+        source:      r['Challan Source']          || '',
+        vehicle:     r['Vehicle Number']          || '',
+        challanDate: challanDateParsed,
+        deviceType:  r['Device Type']             || '',
+        officer:     (r['Challaning Officer Name'] || '').trim().toUpperCase(),
+        status:      r['Status']                  || '',
+        amount:      parseFloat(String(r['Amount (Rs.)'] || '0').replace(/,/g, '')) || 0,
+        paymentDate: parseCSVDate(r['Payment Date'] || ''),
+        vehClass:    r['Vehicle Class']           || '',
+        offence:     r['Offences']                || '',
+        monYear:     parseCSVMonthYear(r['MON_YEAR']) || (challanDateParsed ? challanDateParsed.slice(0,7) : ''),
+      };
+    });
+
+      allMonths = [...new Set(rawData.map(r => r.monYear).filter(Boolean))].sort();
+
+      const sel = document.getElementById('month-select');
+      sel.innerHTML = allMonths.map(m => {
+        const parts = m.split('-');
+        const label = parts.length === 2 ? `${parts[1]}/${parts[0]}` : m;
+        return `<option value="${m}">${label}</option>`;
+      }).join('');
+      sel.value = allMonths[allMonths.length - 1];
+
+      // Set last updated time
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const dateStr = now.toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' });
+      const lastUpdatedEl = document.getElementById('last-updated');
+      if (lastUpdatedEl) {
+        lastUpdatedEl.textContent = `Last updated: ${dateStr} ${timeStr}`;
+      }
+
+      renderView();
+      showToast(`Loaded ${rawData.length.toLocaleString()} records across ${allMonths.length} month(s)`);
+    }
+    })
+    .catch(() => {
+      showToast('Could not load data from Google Sheets. Ensure the spreadsheets are publicly shared and you are online.');
+    })
+    .finally(() => showLoader(false));
+});
+
+// ══════════════════════════════════════════════════════════════
+// MODE / VIEW CONTROL
+// ══════════════════════════════════════════════════════════════
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('btn-month').classList.toggle('active', mode === 'month');
+  document.getElementById('btn-year').classList.toggle('active',  mode === 'year');
+  document.getElementById('month-select').style.display = mode === 'month' ? '' : 'none';
+  renderView();
+}
+
+function renderView() {
+  showTeamView();
+}
+
+// ══════════════════════════════════════════════════════════════
+// DATA AGGREGATION
+// ══════════════════════════════════════════════════════════════
+function getSubset() {
+  if (currentMode === 'year') return rawData;
+  const mon = document.getElementById('month-select').value;
+  return rawData.filter(r => r.monYear === mon);
+}
+
+function aggregateOfficers(subset) {
+  const map = {};
+  for (const r of subset) {
+    const k = r.officer;
+    if (!k) continue;
+    if (!map[k]) map[k] = { name: k, cash: 0, arrears: 0, pending: 0,
+      cashAmt: 0, arrearsAmt: 0, pendingAmt: 0, totalAmt: 0, rows: [], sources: {} };
+    const status = (r.status || '').toLowerCase();
+    if (status === 'cash')    { map[k].cash++;    map[k].cashAmt    += r.amount; }
+    if (status === 'arrears') { map[k].arrears++; map[k].arrearsAmt += r.amount; }
+    if (status === 'pending') { map[k].pending++; map[k].pendingAmt += r.amount; }
+    map[k].rows.push(r);
+    const src = r.source || 'Unknown';
+    map[k].sources[src] = (map[k].sources[src] || 0) + 1;
+  }
+
+  const nMonths = currentMode === 'year' ? allMonths.length : 1;
+  const selMon   = currentMode === 'year' ? null : document.getElementById('month-select').value;
+
+  return Object.values(map).map(o => {
+    const meta    = OFFICER_META[o.name] || { desig: '', monthly: {} };
+    let target = 0;
+    if (currentMode === 'year') {
+      allMonths.forEach(m => { target += getMonthlyTarget(o.name, m); });
+    } else {
+      target = getMonthlyTarget(o.name, selMon);
+    }
+    const total   = o.cashAmt + o.arrearsAmt;
+    const pct     = target > 0 ? Math.round(total / target * 100 * 100) / 100 : 0;
+    return { ...o, desig: meta.desig || 'N/A', target, total, pct };
+  }).sort((a,b) => b.pct - a.pct)
+    .map((o, i) => ({ ...o, rank: i + 1 }));
+}
+
+function buildTrend(officerKey) {
+  return allMonths.map(mon => {
+    const rows = rawData.filter(r => r.officer === officerKey && r.monYear === mon);
+    const cash = rows.filter(r => r.status === 'Cash').reduce((s,r) => s + r.amount, 0);
+    const arrears = rows.filter(r => r.status === 'Arrears').reduce((s,r) => s + r.amount, 0);
+    return { mon, cash, arrears, total: cash + arrears };
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// TEAM VIEW
+// ══════════════════════════════════════════════════════════════
+function showTeamView() {
+  document.getElementById('team-view').style.display = 'block';
+  document.getElementById('officer-detail').style.display = 'none';
+  document.getElementById('btn-back').style.display = 'none';
+
+  const subset   = getSubset();
+  const officers = aggregateOfficers(subset);
+  const mon      = document.getElementById('month-select').value;
+  const label    = currentMode === 'year'
+    ? allMonths.map(m => m.split('-')[1] + '/' + m.split('-')[0]).join(' → ')
+    : (mon.includes('-') ? mon.split('-')[1] + '/' + mon.split('-')[0] : mon);
+
+  document.getElementById('period-badge').textContent = label;
+  document.getElementById('period-badge').style.display = 'inline-block';
+
+  renderKPIs(officers, subset);
+  renderOfficerCards(officers);
+  renderTeamCharts(officers, subset);
+}
+
+function renderKPIs(officers, subset) {
+  const totalCash    = officers.reduce((s,o) => s + o.cashAmt, 0);
+  const totalArrears = officers.reduce((s,o) => s + o.arrearsAmt, 0);
+  const totalTarget  = officers.reduce((s,o) => s + o.target, 0);
+  const totalAll     = totalCash + totalArrears;
+  const teamPct      = totalTarget > 0 ? (totalAll / totalTarget * 100).toFixed(1) : 0;
+  
+  const totalCashVCRs    = officers.reduce((s,o) => s + o.cash, 0);
+  const totalPendingVCRs = officers.reduce((s,o) => s + o.pending, 0);
+
+  // Correction: Total Challans strictly calculated from Cash + Pending states only
+  const validChallansCount = totalCashVCRs + totalPendingVCRs;
+
+  // Correction: Extract Active Days safely ONLY from Cash and Pending states
+  const activeDays = new Set(
+    subset
+      .filter(r => {
+        const s = (r.status || '').toLowerCase();
+        return s === 'cash' || s === 'pending';
+      })
+      .map(r => getCleanISODate(r.challanDate))
+      .filter(Boolean)
+  ).size;
+
+  const c = pctColour(parseFloat(teamPct));
+
+  document.getElementById('kpi-strip').innerHTML = `
+    <div class="kpi-card">
+      <div class="kpi-label">Total Collected</div>
+      <div class="kpi-value c-teal">Rs. ${indianFmt(totalAll)}</div>
+      <div class="kpi-sub">Cash + Arrears</div>
+    </div>
+    <div class="kpi-card" style="border-left-color:var(--green)">
+      <div class="kpi-label">Cash Collected</div>
+      <div class="kpi-value c-green">Rs. ${indianFmt(totalCash)}</div>
+      <div class="kpi-sub">Disposed Revenue</div>
+    </div>
+    <div class="kpi-card" style="border-left-color:var(--amber)">
+      <div class="kpi-label">Arrears Collected</div>
+      <div class="kpi-value c-amber">Rs. ${indianFmt(totalArrears)}</div>
+      <div class="kpi-sub">${officers.reduce((s,o)=>s+o.arrears,0)} arrear challans</div>
+    </div>
+    <div class="kpi-card" style="border-left-color:${c.bar}">
+      <div class="kpi-label">Team Achievement</div>
+      <div class="kpi-value" style="color:${c.fg}">${teamPct}%</div>
+      <div class="kpi-sub">of Rs. ${indianFmt(totalTarget)} target</div>
+    </div>
+    <div class="kpi-card" style="border-left-color:var(--green)">
+      <div class="kpi-label">VCRs Disposed (Cash)</div>
+      <div class="kpi-value c-green">${totalCashVCRs.toLocaleString()}</div>
+      <div class="kpi-sub">Challans Paid</div>
+    </div>
+    <div class="kpi-card" style="border-left-color:var(--red)">
+      <div class="kpi-label">VCRs Pending</div>
+      <div class="kpi-value c-red">${totalPendingVCRs.toLocaleString()}</div>
+      <div class="kpi-sub">Unpaid Cases</div>
+    </div>
+    <div class="kpi-card" style="border-left-color:#818cf8">
+      <div class="kpi-label">Total Challans</div>
+      <div class="kpi-value" style="color:#4f46e5">${validChallansCount.toLocaleString()}</div>
+      <div class="kpi-sub">${activeDays} unique active days (Cash/Pend)</div>
+    </div>
+    <div class="kpi-card" style="border-left-color:var(--amber)">
+      <div class="kpi-label">Arrears</div>
+      <div class="kpi-value c-amber">${officers.reduce((s,o)=>s+o.arrears,0).toLocaleString()}</div>
+      <div class="kpi-sub">Arrear Challans</div>
+    </div>
+  `;
+}
+
+function renderOfficerCards(officers) {
+  if (!officers.length) {
+    document.getElementById('officers-grid').innerHTML = '<div class="empty">No officer data for selected period.</div>';
+    return;
+  }
+  document.getElementById('officers-grid').innerHTML = officers.map(o => {
+    const c   = o.target > 0 ? pctColour(o.pct) : { bg: '#f1f5f9', fg: '#475569', bar: '#94a3b8' };
+    const rk  = o.rank <= 3 ? `rank-${o.rank}` : 'rank-other';
+    const pct = Math.min(o.pct, 100);
+    const pctText = o.target > 0 ? `${o.pct}% — ${pctLabel(o.pct)}` : 'No Target';
+
+    if (o.target > 0) {
+      const styles = getCardStyle(o.pct);
+      return `
+      <div class="officer-card" style="${styles.cardStyle}" onclick="showOfficerDetail('${o.name}')">
+        <div class="officer-rank ${rk}">#${o.rank}</div>
+        <div class="officer-name" style="color: inherit;">${o.name}</div>
+        <div class="officer-desig" style="${styles.metaStyle}">${o.desig}</div>
+        <span class="pill pct-badge" style="${styles.badgeStyle}">
+          ${pctText}
+        </span>
+        <div class="officer-pct-bar" style="background: ${styles.barBg};">
+          <div class="officer-pct-fill" style="width:${pct}%;background:${styles.barFill}"></div>
+        </div>
+        <div class="officer-stats">
+          <div class="officer-stat-item">
+            <div class="officer-stat-val" style="${styles.valStyle}">Rs.${indianFmt(o.total)}</div>
+            <div class="officer-stat-lbl" style="${styles.labelStyle}">Total</div>
+          </div>
+          <div class="officer-stat-item">
+            <div class="officer-stat-val" style="${styles.valStyle}">Rs.${indianFmt(o.cashAmt)}</div>
+            <div class="officer-stat-lbl" style="${styles.labelStyle}">Cash</div>
+          </div>
+          <div class="officer-stat-item">
+            <div class="officer-stat-val" style="${styles.valStyle}">Rs.${indianFmt(o.arrearsAmt)}</div>
+            <div class="officer-stat-lbl" style="${styles.labelStyle}">Arrears</div>
+          </div>
+          <div class="officer-stat-item">
+            <div class="officer-stat-val" style="${styles.valStyle}">${o.pending}</div>
+            <div class="officer-stat-lbl" style="${styles.labelStyle}">Pending</div>
+          </div>
+        </div>
+      </div>`;
+    } else {
+      return `
+      <div class="officer-card" style="background:#2d343b;border-color:#3d444d;opacity:.6;" onclick="showOfficerDetail('${o.name}')">
+        <div class="officer-rank ${rk}">#${o.rank}</div>
+        <div class="officer-name">${o.name}</div>
+        <div class="officer-desig">${o.desig}</div>
+        <span class="pill pct-badge" style="background:${c.bg};color:${c.fg}">
+          ${pctText}
+        </span>
+        <div class="officer-pct-bar">
+          <div class="officer-pct-fill" style="width:${pct}%;background:${c.bar}"></div>
+        </div>
+        <div class="officer-stats">
+          <div class="officer-stat-item">
+            <div class="officer-stat-val c-teal">Rs.${indianFmt(o.total)}</div>
+            <div class="officer-stat-lbl">Total</div>
+          </div>
+          <div class="officer-stat-item">
+            <div class="officer-stat-val c-green">Rs.${indianFmt(o.cashAmt)}</div>
+            <div class="officer-stat-lbl">Cash</div>
+          </div>
+          <div class="officer-stat-item">
+            <div class="officer-stat-val c-amber">Rs.${indianFmt(o.arrearsAmt)}</div>
+            <div class="officer-stat-lbl">Arrears</div>
+          </div>
+          <div class="officer-stat-item">
+            <div class="officer-stat-val" style="color:var(--red)">${o.pending}</div>
+            <div class="officer-stat-lbl">Pending</div>
+          </div>
+        </div>
+      </div>`;
+    }
+  }).join('');
+}
+
+function renderTeamCharts(officers, subset) {
+  const container = document.getElementById('team-charts');
+  container.innerHTML = `
+    <div class="chart-card">
+      <h3>Collection by Officer</h3>
+      <div class="chart-wrap"><canvas id="tc-bar"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <h3>Target Achievement %</h3>
+      <div class="chart-wrap"><canvas id="tc-pct"></canvas></div>
+    </div>
+    <div class="chart-card full">
+      <h3>Month-Wise Team Collection Trend</h3>
+      <div class="chart-wrap"><canvas id="tc-trend"></canvas></div>
+    </div>
+  `;
+
+  destroyChart('tc-bar');
+  chartInstances['tc-bar'] = new Chart(document.getElementById('tc-bar'), {
+    type: 'bar',
+    data: {
+      labels: officers.map(o => o.name),
+      datasets: [
+        { label: 'Cash',    data: officers.map(o => o.cashAmt),    backgroundColor: '#0ea5e9', borderRadius: 6, hoverBackgroundColor: '#38bdf8' },
+        { label: 'Arrears', data: officers.map(o => o.arrearsAmt), backgroundColor: '#fbbf24', borderRadius: 4, hoverBackgroundColor: '#fcd34d' },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      plugins: { legend: { position: 'top', labels: { font: { size: 11, family: 'Inter' }, color: '#a1a1aa', padding: 16 } } },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10, family: 'Inter' }, color: '#71717a' } },
+        y: { stacked: true, grid: { color: 'rgba(255,255,255,.06)' }, ticks: { font: { size: 10, family: 'Inter' }, color: '#71717a', callback: v => shortIndianFmt(v) } }
+      }
+    }
+  });
+
+  destroyChart('tc-pct');
+  chartInstances['tc-pct'] = new Chart(document.getElementById('tc-pct'), {
+    type: 'bar',
+    data: {
+      labels: officers.map(o => o.name),
+      datasets: [{
+        label: 'Achievement %',
+        data: officers.map(o => o.pct),
+        backgroundColor: officers.map(o => pctColour(o.pct).bar),
+        borderRadius: 6,
+        hoverBackgroundColor: officers.map(o => pctColour(o.pct).fg),
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,.06)' }, ticks: { color: '#71717a', callback: v => v + '%', font: { size: 10, family: 'Inter' } }, max: Math.max(120, ...officers.map(o=>o.pct)) },
+        y: { grid: { display: false }, ticks: { color: '#a1a1aa', font: { size: 10, family: 'Inter' } } }
+      }
+    }
+  });
+
+  destroyChart('tc-trend');
+  const trendData = allMonths.map(mon => {
+    const rows = rawData.filter(r => r.monYear === mon);
+    return {
+      mon,
+      cash:    rows.filter(r=>r.status==='Cash').reduce((s,r)=>s+r.amount,0),
+      arrears: rows.filter(r=>r.status==='Arrears').reduce((s,r)=>s+r.amount,0),
+    };
+  });
+  const totals     = trendData.map(d => d.cash + d.arrears);
+  const teamTgts   = allMonths.map(m => getTeamMonthlyTarget(m));
+
+  chartInstances['tc-trend'] = new Chart(document.getElementById('tc-trend'), {
+    type: 'bar',
+    data: {
+      labels: allMonths.map(m => m.slice(5) + ' ' + m.slice(0,4)),
+      datasets: [
+        { label:'Cash',    data: trendData.map(d=>d.cash),    backgroundColor:'#0ea5e9', hoverBackgroundColor:'#38bdf8', stack:'s', borderRadius:4 },
+        { label:'Arrears', data: trendData.map(d=>d.arrears), backgroundColor:'#fbbf24', hoverBackgroundColor:'#fcd34d', stack:'s', borderRadius:4 },
+        { label:'Total',   data: totals, type:'line', borderColor:'#a78bfa', backgroundColor:'transparent', pointBackgroundColor:'#a78bfa', pointRadius:5, borderWidth:2, tension:.3, order:0 },
+        { label:'Target',  data: teamTgts, type:'line', borderColor:'#f43f5e', borderDash:[6,4], backgroundColor:'transparent', pointRadius:0, borderWidth:1.5, order:0 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      plugins: { legend: { position:'top', labels:{ font:{size:11, family:'Inter'}, color:'#a1a1aa', padding:16 } } },
+      scales: {
+        x: { grid:{display:false}, ticks:{font:{size:10, family:'Inter'}, color:'#71717a'} },
+        y: { grid:{color:'rgba(255,255,255,.06)'}, ticks:{font:{size:10, family:'Inter'}, color:'#71717a', callback: v => shortIndianFmt(v)} }
+      }
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// OFFICER DETAIL VIEW
+// ══════════════════════════════════════════════════════════════
+function showOfficerDetail(officerKey) {
+  document.getElementById('team-view').style.display = 'none';
+  document.getElementById('officer-detail').style.display = 'block';
+  document.getElementById('btn-back').style.display = 'inline-block';
+
+  const subset   = getSubset();
+  const officers = aggregateOfficers(subset);
+  const o        = officers.find(x => x.name === officerKey);
+  if (!o) return;
+
+  const c = o.target > 0 ? pctColour(o.pct) : { bg: '#f1f5f9', fg: '#475569', bar: '#94a3b8' };
+
+  document.getElementById('d-avatar').textContent = initials(o.name);
+  document.getElementById('d-name').textContent = o.name;
+  document.getElementById('d-meta').textContent = `${o.desig}  ·  Rank #${o.rank}  ·  ${o.target > 0 ? pctLabel(o.pct) : 'No Target Set'}`;
+  const pctEl = document.getElementById('d-pct');
+  pctEl.textContent = o.target > 0 ? o.pct + '%' : '—';
+  pctEl.style.color = c.bar;
+
+  // Correction: Officer level total active unique days explicitly filtered for Cash and Pending cases
+  const activeDays = new Set(
+    o.rows
+      .filter(r => r.status === 'Cash' || r.status === 'Pending')
+      .map(r => getCleanISODate(r.challanDate))
+      .filter(Boolean)
+  ).size;
+
+  // Correction: Officer level total valid cases calculation logic change (Cash + Pending only)
+  const validOfficerChallans = o.cash + o.pending;
+
+  document.getElementById('d-kpis').innerHTML = `
+    <div class="detail-kpi">
+      <div class="detail-kpi-lbl">Target</div>
+      <div class="detail-kpi-val">${o.target > 0 ? 'Rs. ' + indianFmt(o.target) : 'Not Set'}</div>
+    </div>
+    <div class="detail-kpi">
+      <div class="detail-kpi-lbl">Cash Collected</div>
+      <div class="detail-kpi-val c-green">Rs. ${indianFmt(o.cashAmt)}</div>
+    </div>
+    <div class="detail-kpi">
+      <div class="detail-kpi-lbl">Arrears Collected</div>
+      <div class="detail-kpi-val c-amber">Rs. ${indianFmt(o.arrearsAmt)}</div>
+    </div>
+    <div class="detail-kpi">
+      <div class="detail-kpi-lbl">Total Realized</div>
+      <div class="detail-kpi-val c-teal">Rs. ${indianFmt(o.total)}</div>
+    </div>
+    <div class="detail-kpi">
+      <div class="detail-kpi-lbl">Total Challans (Cash/Pend)</div>
+      <div class="detail-kpi-val">${validOfficerChallans}</div>
+    </div>
+	<div class="detail-kpi">
+		<div class="detail-kpi-lbl">Disposed Challans (Cash)</div>
+		<div class="detail-kpi-val c-green">${o.cash}</div>
+	</div>
+    <div class="detail-kpi">
+      <div class="detail-kpi-lbl">Pending Challans</div>
+      <div class="detail-kpi-val c-red">${o.pending}</div>
+    </div>
+    <div class="detail-kpi">
+      <div class="detail-kpi-lbl">Arrear Challans</div>
+      <div class="detail-kpi-val c-amber">${o.arrears}</div>
+    </div>
+    <div class="detail-kpi">
+      <div class="detail-kpi-lbl">Active Days (Cash/Pend)</div>
+      <div class="detail-kpi-val">${activeDays}</div>
+    </div>
+    <div class="detail-kpi">
+      <div class="detail-kpi-lbl">Challan Source (Cash + Pending)</div>
+      <div class="detail-kpi-val">${Object.entries(o.rows.filter(r => r.status === 'Cash' || r.status === 'Pending').reduce((m, r) => { m[r.source] = (m[r.source] || 0) + 1; return m; }, {})).map(([s,n]) => `${s}: ${n}`).join(' &middot; ') || '—'}</div>
+    </div>
+
+  `;
+
+  destroyChart('d-chart-bar');
+  chartInstances['d-chart-bar'] = new Chart(document.getElementById('d-chart-bar'), {
+    type: 'bar',
+    data: {
+      labels: ['Pending', 'Disposed (Cash)', 'Arrears'],
+      datasets: [{
+        data: [o.pending, o.cash, o.arrears],
+        backgroundColor: ['rgba(244,63,94,.75)', 'rgba(14,165,233,.75)', 'rgba(251,191,36,.75)'],
+        hoverBackgroundColor: ['#fb7185', '#38bdf8', '#fcd34d'],
+        borderRadius: 8,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid:{display:false}, ticks:{font:{size:11, family:'Inter'}, color:'#71717a'} },
+        y: { grid:{color:'rgba(255,255,255,.06)'}, ticks:{font:{size:10, family:'Inter'}, color:'#71717a'} }
+      }
+    }
+  });
+
+  destroyChart('d-chart-donut');
+  chartInstances['d-chart-donut'] = new Chart(document.getElementById('d-chart-donut'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Cash', 'Arrears'],
+      datasets: [{
+        data: [o.cashAmt || 0.001, o.arrearsAmt || 0.001],
+        backgroundColor: ['#0ea5e9', '#fbbf24'],
+        borderWidth: 2, borderColor: 'rgba(255,255,255,.05)', hoverOffset: 6,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '68%',
+      plugins: {
+        legend: { position: 'bottom', labels: { font:{size:11, family:'Inter'}, padding:14, color:'#a1a1aa' } },
+        tooltip: { callbacks: { label: ctx => ` Rs. ${indianFmt(ctx.raw)}` } }
+      }
+    }
+  });
+
+  const trend = buildTrend(officerKey);
+  const selMon = document.getElementById('month-select').value;
+  const officerTgts = trend.map(d => getMonthlyTarget(officerKey, d.mon));
+
+  destroyChart('d-chart-trend');
+  chartInstances['d-chart-trend'] = new Chart(document.getElementById('d-chart-trend'), {
+    type: 'bar',
+    data: {
+      labels: trend.map(d => d.mon.slice(5) + ' ' + d.mon.slice(0,4)),
+      datasets: [
+        { label:'Cash',    data:trend.map(d=>d.cash),    backgroundColor:'#0ea5e9', hoverBackgroundColor:'#38bdf8', stack:'s', borderRadius:4 },
+        { label:'Arrears', data:trend.map(d=>d.arrears), backgroundColor:'#fbbf24', hoverBackgroundColor:'#fcd34d', stack:'s', borderRadius:4 },
+        { label:'Total',   data:trend.map(d=>d.total), type:'line', borderColor:'#a78bfa', backgroundColor:'transparent', pointBackgroundColor: trend.map(d=>d.mon===selMon?'#a78bfa':'#c084fc'), pointRadius:5, borderWidth:2, tension:.3, order:0 },
+        { label:'Monthly Target', data:officerTgts, type:'line', borderColor:'#f43f5e', borderDash:[5,4], backgroundColor:'transparent', pointRadius:0, borderWidth:1.5, order:0 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      plugins: { legend: { position:'top', labels:{font:{size:11, family:'Inter'}, color:'#a1a1aa'} } },
+      scales: {
+        x: { grid:{display:false}, ticks:{font:{size:10, family:'Inter'}, color:'#71717a'} },
+        y: { grid:{color:'rgba(255,255,255,.06)'}, ticks:{font:{size:10, family:'Inter'}, color:'#71717a', callback: v => shortIndianFmt(v)} }
+      }
+    }
+  });
+
+  // ── Date-Wise Collection Flow Table ──
+  const dateMap = {};
+  for (const r of o.rows) {
+    const dk = getCleanISODate(r.challanDate);
+    if (!dk) continue;
+    if (!dateMap[dk]) dateMap[dk] = { cash: 0, arrears: 0, pending: 0, count: 0 };
+    const status = (r.status || '').toLowerCase();
+    if (status === 'cash')    dateMap[dk].cash    += r.amount;
+    if (status === 'arrears') dateMap[dk].arrears += r.amount;
+    if (status === 'pending') dateMap[dk].pending += r.amount;
+    dateMap[dk].count++;
+  }
+
+  // Sort reverse chronological: Newest dates first
+  const dateRows = Object.entries(dateMap)
+    .sort(([a],[b]) => b.localeCompare(a))
+    .map(([date, v]) => ({ date, ...v, collected: v.cash + v.arrears }));
+
+  document.getElementById('d-datewise-body').innerHTML = dateRows.length
+    ? dateRows.map((dr, i) => `
+        <tr>
+          <td>${i+1}</td>
+          <td>${formatDate(dr.date)}</td>
+          <td style="text-align:right" class="c-green">Rs. ${indianFmt(dr.cash)}</td>
+          <td style="text-align:right" class="c-amber">Rs. ${indianFmt(dr.arrears)}</td>
+          <td style="text-align:right;font-weight:700" class="c-teal">Rs. ${indianFmt(dr.collected)}</td>
+          <td style="text-align:right" class="c-red">Rs. ${indianFmt(dr.pending)}</td>
+          <td style="text-align:center">${dr.count}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="7" style="text-align:center;padding:24px;color:#94a3b8">No records found</td></tr>';
+
+
+  document.getElementById('officer-detail').scrollIntoView({ behavior: 'smooth' });
+}
+</script>
+</body>
+</html>
