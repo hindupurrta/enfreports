@@ -660,13 +660,14 @@ window.addEventListener('DOMContentLoaded', () => {
       }).join('');
       sel.value = allMonths[allMonths.length - 1];
 
-      // Set last updated time
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const dateStr = now.toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' });
+      // Determine the most recent challan date as the "Last updated" date
+      const dates = rawData.map(r => r.challanDate).filter(Boolean);
+      const lastChallanDate = dates.length > 0 ? new Date(Math.max(...dates.map(d => new Date(d)))) : new Date();
+      const timeStr = lastChallanDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const dateStr = lastChallanDate.toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' });
       const lastUpdatedEl = document.getElementById('last-updated');
       if (lastUpdatedEl) {
-        lastUpdatedEl.textContent = `Last updated: ${dateStr} ${timeStr}`;
+        lastUpdatedEl.textContent = `Data current as of: ${dateStr}`;
       }
 
       renderView();
