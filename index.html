@@ -887,13 +887,17 @@ window.addEventListener('DOMContentLoaded', () => {
       }).join('');
       sel.value = allMonths[allMonths.length - 1];
 
-      // Set last updated time
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const dateStr = now.toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' });
+      // Set last updated to the latest (max) Challan Date found in the data
+      const maxChallanDate = rawData
+        .map(r => r.challanDate)
+        .filter(Boolean)
+        .sort()
+        .pop();
       const lastUpdatedEl = document.getElementById('last-updated');
       if (lastUpdatedEl) {
-        lastUpdatedEl.textContent = `Last updated: ${dateStr} ${timeStr}`;
+        lastUpdatedEl.textContent = maxChallanDate
+          ? `Last updated: ${formatDate(maxChallanDate)}`
+          : '';
       }
 
       renderView();
