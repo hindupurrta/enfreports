@@ -497,7 +497,7 @@
       <label>View</label>
       <div class="mode-toggle">
         <button class="mode-btn active" id="btn-view-cards" onclick="setViewType('cards')">Cards</button>
-        <button class="mode-btn" id="btn-view-table" onclick="setViewType('table')">Table Summary</button>
+        <button class="mode-btn" id="btn-view-table" onclick="setViewType('table')">Reports</button>
       </div>
     </div>
 
@@ -517,11 +517,15 @@
           <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">Comprehensive breakdown of targets, collections, pending amounts, and challan counts.</p>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="btn-excel" onclick="exportSummaryToExcel()">
+          <div class="mode-toggle" id="reports-sub-tabs" style="display:none;">
+            <button class="mode-btn active" id="btn-sub-detail" onclick="setReportsSubView('detail')">Detail</button>
+            <button class="mode-btn" id="btn-sub-sta" onclick="setReportsSubView('sta')">STA</button>
+          </div>
+          <button type="button" class="btn-excel" onclick="exportSummaryToExcel(event)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
             Export Excel
           </button>
-          <button class="btn-print" onclick="triggerPrint()">
+          <button type="button" class="btn-print" onclick="triggerPrint(event)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
             Print Summary (A4 Landscape)
           </button>
@@ -549,6 +553,27 @@
           </thead>
           <tbody id="summary-table-body"></tbody>
           <tfoot id="summary-table-foot"></tfoot>
+        </table>
+
+        <table class="summary-table" id="sta-summary-table" style="display: none;">
+          <thead>
+            <tr>
+              <th onclick="sortSTATable(0)" style="cursor:pointer; text-align:center;">S.No. <span class="sort-icon">↕</span></th>
+              <th onclick="sortSTATable(1)" style="cursor:pointer;">Name <span class="sort-icon">↕</span></th>
+              <th onclick="sortSTATable(2)" style="cursor:pointer;">Designation <span class="sort-icon">↕</span></th>
+              <th onclick="sortSTATable(3)" style="cursor:pointer;">Place <span class="sort-icon">↕</span></th>
+              <th onclick="sortSTATable(4)" style="text-align:right; cursor:pointer;">Target Fixed <span class="sort-icon">↕</span></th>
+              <th onclick="sortSTATable(5)" style="text-align:right; cursor:pointer;">Target Achieved <span class="sort-icon">↕</span></th>
+              <th onclick="sortSTATable(6)" style="text-align:center; cursor:pointer;">Achieved % <span class="sort-icon">↕</span></th>
+              <th onclick="sortSTATable(7)" style="text-align:center; cursor:pointer;">No. of VCRs made <span class="sort-icon">↕</span></th>
+              <th onclick="sortSTATable(8)" style="text-align:center; cursor:pointer;">No. of VCRs realized (Prev+Pres) <span class="sort-icon">↕</span></th>
+              <th onclick="sortSTATable(9)" style="text-align:center; cursor:pointer;">No. of VCRs realized <span class="sort-icon">↕</span></th>
+              <th onclick="sortSTATable(10)" style="text-align:center; cursor:pointer;">No. of VCRs pending <span class="sort-icon">↕</span></th>
+              <th onclick="sortSTATable(11)" style="text-align:right; cursor:pointer;">Pending Amount <span class="sort-icon">↕</span></th>
+            </tr>
+          </thead>
+          <tbody id="sta-table-body"></tbody>
+          <tfoot id="sta-table-foot"></tfoot>
         </table>
       </div>
     </div>
@@ -789,12 +814,13 @@ window.addEventListener('DOMContentLoaded', () => {
         console.log('RAW Target rows:', JSON.stringify(rawRows));
         if (rawRows.length >= 2) {
           const headers = rawRows[0].map(h => String(h || '').trim());
-          let nameCol = -1, desigCol = -1;
+          let nameCol = -1, desigCol = -1, placeCol = -1;
           const monthMap = {};
           headers.forEach((h, idx) => {
             const hl = h.toLowerCase();
             if (hl.includes('officer') && hl.includes('name')) nameCol = idx;
             else if (hl.includes('desig')) desigCol = idx;
+            else if (hl.includes('place') || hl.includes('station') || hl.includes('location')) placeCol = idx;
             let monKey = null;
             const m3 = h.match(/^([A-Za-z]{3})[- ]?(\d{2,4})$/);
             if (m3) {
@@ -811,7 +837,8 @@ window.addEventListener('DOMContentLoaded', () => {
             const name = nameCol >= 0 ? String(row[nameCol] || '').trim().toUpperCase() : '';
             if (!name) continue;
             const desig = desigCol >= 0 ? String(row[desigCol] || '').trim() : '';
-            const meta = { desig, monthly: {} };
+            const place = placeCol >= 0 ? String(row[placeCol] || '').trim() : '';
+            const meta = { desig, place, monthly: {} };
             let hasMonthCols = false;
             for (const [cStr, monKey] of Object.entries(monthMap)) {
               const val = parseFloat(String(row[parseInt(cStr)] || '0').replace(/,/g, '')) || 0;
@@ -984,9 +1011,17 @@ function setViewType(type) {
   viewType = type;
   const btnCards = document.getElementById('btn-view-cards');
   const btnTable = document.getElementById('btn-view-table');
+  const subTabs = document.getElementById('reports-sub-tabs');
 
   if (btnCards) btnCards.classList.toggle('active', type === 'cards');
   if (btnTable) btnTable.classList.toggle('active', type === 'table');
+
+  if (type === 'table') {
+    if (subTabs) subTabs.style.display = 'flex';
+    setReportsSubView('detail');
+  } else {
+    if (subTabs) subTabs.style.display = 'none';
+  }
 
   const gridEl    = document.getElementById('officers-grid');
   const chartsEl  = document.getElementById('team-charts');
@@ -1003,7 +1038,36 @@ function setViewType(type) {
   }
 }
 
-function triggerPrint() {
+let currentSubView = 'detail';
+function setReportsSubView(view) {
+  currentSubView = view;
+  const btnDetail = document.getElementById('btn-sub-detail');
+  const btnSta = document.getElementById('btn-sub-sta');
+
+  if (btnDetail) btnDetail.classList.toggle('active', view === 'detail');
+  if (btnSta) btnSta.classList.toggle('active', view === 'sta');
+
+  const tblDetail = document.getElementById('officers-summary-table');
+  const tblSta = document.getElementById('sta-summary-table');
+
+  if (view === 'detail') {
+    if (tblDetail) tblDetail.style.display = '';
+    if (tblSta) tblSta.style.display = 'none';
+  } else if (view === 'sta') {
+    if (tblDetail) tblDetail.style.display = 'none';
+    if (tblSta) tblSta.style.display = '';
+
+    // We already have currentOfficersData from renderTeamView
+    // we just need to render the STA table
+    renderSTATable(currentOfficersData);
+  }
+}
+
+function triggerPrint(e) {
+  if (e) {
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+  }
   const monSelect = document.getElementById('month-select');
   const mon = monSelect ? monSelect.value : '';
   const periodText = currentMode === 'year'
@@ -1031,10 +1095,10 @@ function triggerPrint() {
   window.print();
 }
 
-function exportSummaryToExcel() {
-  if (!currentOfficersData || !currentOfficersData.length) {
-    showToast('No summary data to export');
-    return;
+function exportSummaryToExcel(e) {
+  if (e) {
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
   }
 
   const monSelect = document.getElementById('month-select');
@@ -1043,79 +1107,155 @@ function exportSummaryToExcel() {
     ? 'Full_Year'
     : (mon && mon.includes('-') ? `${mon.split('-')[1]}_${mon.split('-')[0]}` : mon);
 
-  const excelRows = currentOfficersData.map((o, idx) => {
-    const validChallans = o.cash + o.pending;
-    const totalCashPendingAmt = (o.cashAmt || 0) + (o.pendingAmt || 0);
-    return {
-      'Rank': o.rank || (idx + 1),
-      'Officer Name': o.name,
-      'Designation': o.desig,
-      'Target (Rs)': o.target || 0,
-      'Total Cases': validChallans || 0,
-      'Total Amount (Cash+Pending) (Rs)': totalCashPendingAmt || 0,
-      'Pending Cases': o.pending || 0,
-      'Pending Amount (Rs)': o.pendingAmt || 0,
-      'Cash Cases': o.cash || 0,
-      'Cash Collected (Rs)': o.cashAmt || 0,
-      'Arrear Cases': o.arrears || 0,
-      'Arrears Collected (Rs)': o.arrearsAmt || 0,
-      'Total Realized (Rs)': o.total || 0,
-      'Achievement %': o.pct || 0
-    };
-  });
+  let excelRows, sheetName, fileName, colWidths;
 
-  // Append Total Row
-  const totalTarget = currentOfficersData.reduce((s,o) => s + o.target, 0);
-  const totalCashAmt = currentOfficersData.reduce((s,o) => s + o.cashAmt, 0);
-  const totalArrearsAmt = currentOfficersData.reduce((s,o) => s + o.arrearsAmt, 0);
-  const totalRealized = totalCashAmt + totalArrearsAmt;
-  const totalPendingAmt = currentOfficersData.reduce((s,o) => s + (o.pendingAmt || 0), 0);
-  const totalCashPendingAmt = totalCashAmt + totalPendingAmt;
-  const teamPct = totalTarget > 0 ? parseFloat((totalRealized / totalTarget * 100).toFixed(1)) : 0;
-  const totalCashCount = currentOfficersData.reduce((s,o) => s + o.cash, 0);
-  const totalPendingCount = currentOfficersData.reduce((s,o) => s + o.pending, 0);
-  const totalArrearsCount = currentOfficersData.reduce((s,o) => s + o.arrears, 0);
+  if (currentSubView === 'sta') {
+    // ── Export STA Report ──
+    if (!currentSTAData || !currentSTAData.length) {
+      showToast('No STA data to export');
+      return;
+    }
 
-  excelRows.push({
-    'Rank': '',
-    'Officer Name': 'TEAM TOTAL',
-    'Designation': '',
-    'Target (Rs)': totalTarget,
-    'Total Cases': totalCashCount + totalPendingCount,
-    'Total Amount (Cash+Pending) (Rs)': totalCashPendingAmt,
-    'Pending Cases': totalPendingCount,
-    'Pending Amount (Rs)': totalPendingAmt,
-    'Cash Cases': totalCashCount,
-    'Cash Collected (Rs)': totalCashAmt,
-    'Arrear Cases': totalArrearsCount,
-    'Arrears Collected (Rs)': totalArrearsAmt,
-    'Total Realized (Rs)': totalRealized,
-    'Achievement %': teamPct
-  });
+    excelRows = currentSTAData.map(r => ({
+      'S.No.': r.sno,
+      'Name': r.name,
+      'Designation': r.desig,
+      'Place': r.place,
+      'Target Fixed': r.targetFixed,
+      'Target Achieved': r.targetAchieved,
+      'Achieved %': r.achievedPct,
+      'No. of VCRs made': r.vcrsMAde,
+      'No. of VCRs realized (Prev+Pres)': r.vcrsRealizedPrevPres,
+      'No. of VCRs realized': r.vcrsRealized,
+      'No. of VCRs pending': r.vcrsPending,
+      'Pending Amount': r.pendingAmt
+    }));
+
+    // Append Total Row
+    const totTargetFixed = currentSTAData.reduce((s,r) => s + r.targetFixed, 0);
+    const totTargetAchieved = currentSTAData.reduce((s,r) => s + r.targetAchieved, 0);
+    const totPct = totTargetFixed > 0 ? parseFloat((totTargetAchieved / totTargetFixed * 100).toFixed(1)) : 0;
+    const totVcrsMade = currentSTAData.reduce((s,r) => s + r.vcrsMAde, 0);
+    const totVcrsRealPP = currentSTAData.reduce((s,r) => s + r.vcrsRealizedPrevPres, 0);
+    const totVcrsReal = currentSTAData.reduce((s,r) => s + r.vcrsRealized, 0);
+    const totVcrsPend = currentSTAData.reduce((s,r) => s + r.vcrsPending, 0);
+    const totPendAmt = currentSTAData.reduce((s,r) => s + r.pendingAmt, 0);
+
+    excelRows.push({
+      'S.No.': '',
+      'Name': 'TEAM TOTAL',
+      'Designation': '',
+      'Place': '',
+      'Target Fixed': totTargetFixed,
+      'Target Achieved': totTargetAchieved,
+      'Achieved %': totPct,
+      'No. of VCRs made': totVcrsMade,
+      'No. of VCRs realized (Prev+Pres)': totVcrsRealPP,
+      'No. of VCRs realized': totVcrsReal,
+      'No. of VCRs pending': totVcrsPend,
+      'Pending Amount': totPendAmt
+    });
+
+    colWidths = [
+      { wch: 6 },   // S.No.
+      { wch: 25 },  // Name
+      { wch: 15 },  // Designation
+      { wch: 15 },  // Place
+      { wch: 14 },  // Target Fixed
+      { wch: 16 },  // Target Achieved
+      { wch: 12 },  // Achieved %
+      { wch: 18 },  // VCRs made
+      { wch: 28 },  // VCRs realized (Prev+Pres)
+      { wch: 20 },  // VCRs realized
+      { wch: 18 },  // VCRs pending
+      { wch: 18 }   // Pending Amount
+    ];
+    sheetName = 'STA Report';
+    fileName = `Enforcement_STA_${currentMode === 'year' ? 'Yearly' : 'Monthly'}_${periodText}.xlsx`;
+
+  } else {
+    // ── Export Detail Report ──
+    if (!currentOfficersData || !currentOfficersData.length) {
+      showToast('No summary data to export');
+      return;
+    }
+
+    excelRows = currentOfficersData.map((o, idx) => {
+      const validChallans = o.cash + o.pending;
+      const totalCashPendingAmt = (o.cashAmt || 0) + (o.pendingAmt || 0);
+      return {
+        'Rank': o.rank || (idx + 1),
+        'Officer Name': o.name,
+        'Designation': o.desig,
+        'Target (Rs)': o.target || 0,
+        'Total Cases': validChallans || 0,
+        'Total Amount (Cash+Pending) (Rs)': totalCashPendingAmt || 0,
+        'Pending Cases': o.pending || 0,
+        'Pending Amount (Rs)': o.pendingAmt || 0,
+        'Cash Cases': o.cash || 0,
+        'Cash Collected (Rs)': o.cashAmt || 0,
+        'Arrear Cases': o.arrears || 0,
+        'Arrears Collected (Rs)': o.arrearsAmt || 0,
+        'Total Realized (Rs)': o.total || 0,
+        'Achievement %': o.pct || 0
+      };
+    });
+
+    // Append Total Row
+    const totalTarget = currentOfficersData.reduce((s,o) => s + o.target, 0);
+    const totalCashAmt = currentOfficersData.reduce((s,o) => s + o.cashAmt, 0);
+    const totalArrearsAmt = currentOfficersData.reduce((s,o) => s + o.arrearsAmt, 0);
+    const totalRealized = totalCashAmt + totalArrearsAmt;
+    const totalPendingAmt = currentOfficersData.reduce((s,o) => s + (o.pendingAmt || 0), 0);
+    const totalCashPendingAmt = totalCashAmt + totalPendingAmt;
+    const teamPct = totalTarget > 0 ? parseFloat((totalRealized / totalTarget * 100).toFixed(1)) : 0;
+    const totalCashCount = currentOfficersData.reduce((s,o) => s + o.cash, 0);
+    const totalPendingCount = currentOfficersData.reduce((s,o) => s + o.pending, 0);
+    const totalArrearsCount = currentOfficersData.reduce((s,o) => s + o.arrears, 0);
+
+    excelRows.push({
+      'Rank': '',
+      'Officer Name': 'TEAM TOTAL',
+      'Designation': '',
+      'Target (Rs)': totalTarget,
+      'Total Cases': totalCashCount + totalPendingCount,
+      'Total Amount (Cash+Pending) (Rs)': totalCashPendingAmt,
+      'Pending Cases': totalPendingCount,
+      'Pending Amount (Rs)': totalPendingAmt,
+      'Cash Cases': totalCashCount,
+      'Cash Collected (Rs)': totalCashAmt,
+      'Arrear Cases': totalArrearsCount,
+      'Arrears Collected (Rs)': totalArrearsAmt,
+      'Total Realized (Rs)': totalRealized,
+      'Achievement %': teamPct
+    });
+
+    colWidths = [
+      { wch: 6 },  // Rank
+      { wch: 25 }, // Officer Name
+      { wch: 15 }, // Designation
+      { wch: 15 }, // Target
+      { wch: 12 }, // Total Cases
+      { wch: 26 }, // Total Amount (Cash+Pending)
+      { wch: 14 }, // Pending Cases
+      { wch: 18 }, // Pending Amount
+      { wch: 12 }, // Cash Cases
+      { wch: 18 }, // Cash Collected
+      { wch: 14 }, // Arrear Cases
+      { wch: 18 }, // Arrears Collected
+      { wch: 18 }, // Total Realized
+      { wch: 14 }  // Achievement %
+    ];
+    sheetName = 'Summary Report';
+    fileName = `Enforcement_Summary_${currentMode === 'year' ? 'Yearly' : 'Monthly'}_${periodText}.xlsx`;
+  }
 
   const ws = XLSX.utils.json_to_sheet(excelRows);
-  
-  ws['!cols'] = [
-    { wch: 6 },  // Rank
-    { wch: 25 }, // Officer Name
-    { wch: 15 }, // Designation
-    { wch: 15 }, // Target
-    { wch: 12 }, // Total Cases
-    { wch: 26 }, // Total Amount (Cash+Pending)
-    { wch: 14 }, // Pending Cases
-    { wch: 18 }, // Pending Amount
-    { wch: 12 }, // Cash Cases
-    { wch: 18 }, // Cash Collected
-    { wch: 14 }, // Arrear Cases
-    { wch: 18 }, // Arrears Collected
-    { wch: 18 }, // Total Realized
-    { wch: 14 }  // Achievement %
-  ];
+  ws['!cols'] = colWidths;
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Summary Report');
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
-  const fileName = `Enforcement_Summary_${currentMode === 'year' ? 'Yearly' : 'Monthly'}_${periodText}.xlsx`;
   XLSX.writeFile(wb, fileName);
   showToast(`Exported ${fileName}`);
 }
@@ -1231,6 +1371,161 @@ function sortTable(colIndex) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// STA TABLE - RENDER & SORT
+// ══════════════════════════════════════════════════════════════
+let currentSTAData = [];
+let staCurrentSortCol = 0;
+let staCurrentSortAsc = true;
+
+function renderSTATable(officers) {
+  currentSTAData = officers.map((o, idx) => {
+    const meta = OFFICER_META[o.name] || { desig: '', monthly: {}, place: '' };
+
+    // Target Fixed = target for the current period
+    const targetFixed = o.target || 0;
+
+    // Target Achieved = cash realized (Cash+Arrears payments = o.total)
+    const targetAchieved = o.cashAmt + o.arrearsAmt;
+
+    // Achieved %
+    const achievedPct = targetFixed > 0
+      ? (targetAchieved / targetFixed * 100).toFixed(1)
+      : '0.0';
+
+    // VCRs made = count of Challan number where status is pending and cash
+    const vcrsMAde = o.cash + o.pending;
+
+    // VCRs realized (Prev+Pres) = count of Challan number where status is arrears and cash
+    const vcrsRealizedPrevPres = o.cash + o.arrears;
+
+    // VCRs realized = count of Challan number where status is cash
+    const vcrsRealized = o.cash;
+
+    // VCRs pending
+    const vcrsPending = o.pending;
+
+    // Pending Amount
+    const pendingAmt = o.pendingAmt || 0;
+
+    // Place from meta (if available)
+    const place = meta.place || '—';
+
+    return {
+      sno: idx + 1,
+      name: o.name,
+      desig: o.desig || meta.desig || 'N/A',
+      place,
+      targetFixed,
+      targetAchieved,
+      achievedPct: parseFloat(achievedPct),
+      vcrsMAde,
+      vcrsRealizedPrevPres,
+      vcrsRealized,
+      vcrsPending,
+      pendingAmt,
+    };
+  });
+
+  _paintSTATable(currentSTAData);
+}
+
+function _paintSTATable(rows) {
+  const tbody = document.getElementById('sta-table-body');
+  const tfoot = document.getElementById('sta-table-foot');
+  if (!tbody) return;
+
+  if (!rows || !rows.length) {
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text-muted)">No data available for selected period</td></tr>';
+    if (tfoot) tfoot.innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = rows.map((r, idx) => {
+    const c = r.targetFixed > 0 ? pctColour(r.achievedPct) : { bg: 'rgba(255,255,255,0.05)', fg: '#a1a1aa' };
+    const pctBadge = r.targetFixed > 0
+      ? `<span class="pill" style="background:${c.bg};color:${c.fg}">${r.achievedPct}%</span>`
+      : `<span class="pill" style="background:rgba(255,255,255,0.05);color:#71717a">N/A</span>`;
+
+    return `
+      <tr>
+        <td style="text-align:center;font-weight:700;color:var(--text-muted)">${idx + 1}</td>
+        <td style="font-weight:700;color:var(--text-primary)">${r.name}</td>
+        <td style="font-size:0.78rem;color:var(--text-muted);text-transform:uppercase">${r.desig}</td>
+        <td>${r.place}</td>
+        <td style="text-align:right">${r.targetFixed > 0 ? indianFmt(r.targetFixed) : '—'}</td>
+        <td style="text-align:right;font-weight:700" class="c-teal">${indianFmt(r.targetAchieved)}</td>
+        <td style="text-align:center">${pctBadge}</td>
+        <td style="text-align:center;font-weight:700">${r.vcrsMAde}</td>
+        <td style="text-align:center" class="c-green">${r.vcrsRealizedPrevPres}</td>
+        <td style="text-align:center" class="c-green">${r.vcrsRealized}</td>
+        <td style="text-align:center" class="c-red">${r.vcrsPending}</td>
+        <td style="text-align:right" class="c-red">${indianFmt(r.pendingAmt)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  if (tfoot) {
+    const totTarget = rows.reduce((s, r) => s + r.targetFixed, 0);
+    const totAchieved = rows.reduce((s, r) => s + r.targetAchieved, 0);
+    const totPct = totTarget > 0 ? (totAchieved / totTarget * 100).toFixed(1) : '0.0';
+    const totVcrsMade = rows.reduce((s, r) => s + r.vcrsMAde, 0);
+    const totVcrsRPP = rows.reduce((s, r) => s + r.vcrsRealizedPrevPres, 0);
+    const totVcrsR = rows.reduce((s, r) => s + r.vcrsRealized, 0);
+    const totVcrsP = rows.reduce((s, r) => s + r.vcrsPending, 0);
+    const totPendAmt = rows.reduce((s, r) => s + r.pendingAmt, 0);
+    const tc = pctColour(parseFloat(totPct));
+
+    tfoot.innerHTML = `
+      <tr>
+        <td colspan="4" style="text-align:right;padding:14px 16px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-primary)">TOTAL:</td>
+        <td style="text-align:right;font-weight:800">${indianFmt(totTarget)}</td>
+        <td style="text-align:right;font-weight:800" class="c-teal">${indianFmt(totAchieved)}</td>
+        <td style="text-align:center"><span class="pill" style="background:${tc.bg};color:${tc.fg};font-weight:800">${totPct}%</span></td>
+        <td style="text-align:center;font-weight:800">${totVcrsMade}</td>
+        <td style="text-align:center;font-weight:800" class="c-green">${totVcrsRPP}</td>
+        <td style="text-align:center;font-weight:800" class="c-green">${totVcrsR}</td>
+        <td style="text-align:center;font-weight:800" class="c-red">${totVcrsP}</td>
+        <td style="text-align:right;font-weight:800" class="c-red">${indianFmt(totPendAmt)}</td>
+      </tr>
+    `;
+  }
+}
+
+function sortSTATable(colIndex) {
+  if (staCurrentSortCol === colIndex) {
+    staCurrentSortAsc = !staCurrentSortAsc;
+  } else {
+    staCurrentSortCol = colIndex;
+    staCurrentSortAsc = true;
+  }
+
+  const sorted = [...currentSTAData].sort((a, b) => {
+    let vA, vB;
+    switch (colIndex) {
+      case 0:  vA = a.sno;                 vB = b.sno;                 break;
+      case 1:  vA = a.name;               vB = b.name;               break;
+      case 2:  vA = a.desig;              vB = b.desig;              break;
+      case 3:  vA = a.place;              vB = b.place;              break;
+      case 4:  vA = a.targetFixed;        vB = b.targetFixed;        break;
+      case 5:  vA = a.targetAchieved;     vB = b.targetAchieved;     break;
+      case 6:  vA = a.achievedPct;        vB = b.achievedPct;        break;
+      case 7:  vA = a.vcrsMAde;           vB = b.vcrsMAde;           break;
+      case 8:  vA = a.vcrsRealizedPrevPres; vB = b.vcrsRealizedPrevPres; break;
+      case 9:  vA = a.vcrsRealized;       vB = b.vcrsRealized;       break;
+      case 10: vA = a.vcrsPending;        vB = b.vcrsPending;        break;
+      case 11: vA = a.pendingAmt;         vB = b.pendingAmt;         break;
+      default: vA = a.sno;               vB = b.sno;
+    }
+    if (typeof vA === 'string') {
+      return staCurrentSortAsc ? vA.localeCompare(vB) : vB.localeCompare(vA);
+    }
+    return staCurrentSortAsc ? vA - vB : vB - vA;
+  });
+
+  _paintSTATable(sorted);
+}
+
+// ══════════════════════════════════════════════════════════════
 // TEAM VIEW
 // ══════════════════════════════════════════════════════════════
 function showTeamView() {
@@ -1252,6 +1547,9 @@ function showTeamView() {
   renderOfficerCards(officers);
   renderTeamCharts(officers, subset);
   renderSummaryTable(officers);
+  if (currentSubView === 'sta') {
+    renderSTATable(officers);
+  }
   setViewType(viewType);
 }
 
