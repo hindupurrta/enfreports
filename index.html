@@ -485,12 +485,20 @@
       <div class="mode-toggle">
         <button class="mode-btn active" id="btn-month" onclick="setMode('month')">Month</button>
         <button class="mode-btn" id="btn-year" onclick="setMode('year')">Full Year</button>
+        <button class="mode-btn" id="btn-custom" onclick="setMode('custom')">Custom</button>
       </div>
     </div>
 
-    <div style="display:flex; align-items:center; gap:8px;">
+    <div style="display:flex; align-items:center; gap:8px;" id="period-month-container">
       <label>Period</label>
       <select id="month-select" onchange="renderView()"></select>
+    </div>
+
+    <div style="display:none; align-items:center; gap:8px;" id="period-custom-container">
+      <label>From</label>
+      <input type="date" id="custom-from" onchange="renderView()" style="border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:.9rem;color:var(--text-primary);background:var(--bg-base);cursor:pointer;color-scheme:dark;">
+      <label style="margin-left:8px;">To</label>
+      <input type="date" id="custom-to" onchange="renderView()" style="border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:.9rem;color:var(--text-primary);background:var(--bg-base);cursor:pointer;color-scheme:dark;">
     </div>
 
     <div style="display:flex; align-items:center; gap:8px;">
@@ -660,6 +668,7 @@ function shortIndianFmt(v) {
   if (v >= 1000) return `₹${(v/1e3).toFixed(0)}k`;
   return `₹${v}`;
 }
+
 function pctColour(pct) {
   if (pct >= 100) return { bg: '#07871e', fg: '#fcfcfa', bar: '#22c55e' };
   if (pct >= 75)  return { bg: '#0000FF', fg: '#fcfcfa', bar: '#0ea5e9' };
@@ -913,6 +922,24 @@ window.addEventListener('DOMContentLoaded', () => {
       }).join('');
       sel.value = allMonths[allMonths.length - 1];
 
+      // Set default custom date range: first and last challan dates in the latest month
+      const latestMon = allMonths[allMonths.length - 1];
+      const datesInLatestMon = rawData
+        .filter(r => r.monYear === latestMon && r.challanDate)
+        .map(r => r.challanDate)
+        .sort();
+      if (datesInLatestMon.length) {
+        document.getElementById('custom-from').value = datesInLatestMon[0];
+        document.getElementById('custom-to').value   = datesInLatestMon[datesInLatestMon.length - 1];
+      } else {
+        // fallback: first and last day of the latest month
+        const [yr, mo] = latestMon.split('-');
+        const firstDay = `${yr}-${mo}-01`;
+        const lastDay  = new Date(parseInt(yr), parseInt(mo), 0).toISOString().slice(0, 10);
+        document.getElementById('custom-from').value = firstDay;
+        document.getElementById('custom-to').value   = lastDay;
+      }
+
       // Set last updated to the latest (max) Challan Date found in the data
       const maxChallanDate = rawData
         .map(r => r.challanDate)
@@ -943,7 +970,24 @@ function setMode(mode) {
   currentMode = mode;
   document.getElementById('btn-month').classList.toggle('active', mode === 'month');
   document.getElementById('btn-year').classList.toggle('active',  mode === 'year');
-  document.getElementById('month-select').style.display = mode === 'month' ? '' : 'none';
+  document.getElementById('btn-custom').classList.toggle('active', mode === 'custom');
+
+  // Toggle visibility: month-select container vs custom date inputs
+  const monthContainer  = document.getElementById('period-month-container');
+  const customContainer = document.getElementById('period-custom-container');
+
+  if (mode === 'month') {
+    monthContainer.style.display  = 'flex';
+    customContainer.style.display = 'none';
+  } else if (mode === 'custom') {
+    monthContainer.style.display  = 'none';
+    customContainer.style.display = 'flex';
+  } else {
+    // year mode – hide both period selectors
+    monthContainer.style.display  = 'none';
+    customContainer.style.display = 'none';
+  }
+
   renderView();
 }
 
@@ -956,6 +1000,19 @@ function renderView() {
 // ══════════════════════════════════════════════════════════════
 function getSubset() {
   if (currentMode === 'year') return rawData;
+  if (currentMode === 'custom') {
+    const fromVal = document.getElementById('custom-from').value; // yyyy-mm-dd
+    const toVal   = document.getElementById('custom-to').value;
+    if (!fromVal || !toVal) return rawData; // if either is empty, show all
+    if (fromVal > toVal) {
+      showToast('Error: "From" date cannot be after "To" date. Please correct the range.');
+      return [];
+    }
+    return rawData.filter(r => {
+      if (!r.challanDate) return false;
+      return r.challanDate >= fromVal && r.challanDate <= toVal;
+    });
+  }
   const mon = document.getElementById('month-select').value;
   return rawData.filter(r => r.monYear === mon);
 }
@@ -977,13 +1034,21 @@ function aggregateOfficers(subset) {
   }
 
   const nMonths = currentMode === 'year' ? allMonths.length : 1;
-  const selMon   = currentMode === 'year' ? null : document.getElementById('month-select').value;
+  const selMon   = currentMode === 'year' ? null : (currentMode === 'custom' ? null : document.getElementById('month-select').value);
+
+  // For custom mode, collect unique months present in the subset rows
+  let customMonths = [];
+  if (currentMode === 'custom') {
+    customMonths = [...new Set(Object.values(map).flatMap(o => o.rows.map(r => r.monYear)).filter(Boolean))];
+  }
 
   return Object.values(map).map(o => {
     const meta    = OFFICER_META[o.name] || { desig: '', monthly: {} };
     let target = 0;
     if (currentMode === 'year') {
       allMonths.forEach(m => { target += getMonthlyTarget(o.name, m); });
+    } else if (currentMode === 'custom') {
+      customMonths.forEach(m => { target += getMonthlyTarget(o.name, m); });
     } else {
       target = getMonthlyTarget(o.name, selMon);
     }
@@ -1062,20 +1127,28 @@ function setReportsSubView(view) {
   }
 }
 
-function triggerPrint(e) {
-  if (e) {
+function triggerPrint(e, fromBeforePrint = false) {
+  if (e && e.type !== 'beforeprint') {
     if (typeof e.preventDefault === 'function') e.preventDefault();
     if (typeof e.stopPropagation === 'function') e.stopPropagation();
   }
   const monSelect = document.getElementById('month-select');
   const mon = monSelect ? monSelect.value : '';
-  const periodText = currentMode === 'year'
-    ? 'Full Year ' + (allMonths.length ? (allMonths[0].split('-')[0]) : '')
-    : (mon && mon.includes('-') ? `Month: ${mon.split('-')[1]}/${mon.split('-')[0]}` : `Month: ${mon}`);
+  let periodText = '';
+  if (currentMode === 'year') {
+    periodText = 'Full Year ' + (allMonths.length ? (allMonths[0].split('-')[0]) : '');
+  } else if (currentMode === 'custom') {
+    const fromVal = document.getElementById('custom-from').value;
+    const toVal   = document.getElementById('custom-to').value;
+    periodText = fromVal && toVal ? `${formatDate(fromVal)} to ${formatDate(toVal)}` : 'Custom Range';
+  } else {
+    periodText = (mon && mon.includes('-') ? `Month: ${mon.split('-')[1]}/${mon.split('-')[0]}` : `Month: ${mon}`);
+  }
 
   const reportTitleEl = document.getElementById('print-report-title');
   if (reportTitleEl) {
-    reportTitleEl.textContent = `Officer Performance Summary (${currentMode === 'year' ? 'Year-Wise' : 'Month-Wise'})`;
+    const modeLabel = currentMode === 'year' ? 'Year-Wise' : (currentMode === 'custom' ? 'Custom Range' : 'Month-Wise');
+    reportTitleEl.textContent = `Officer Performance Summary (${modeLabel})`;
   }
 
   const periodLabelEl = document.getElementById('print-period-label');
@@ -1091,8 +1164,14 @@ function triggerPrint(e) {
     timestampEl.textContent = `Generated on: ${dateStr} ${timeStr}`;
   }
 
-  window.print();
+  if (!fromBeforePrint && e && e.type !== 'beforeprint') {
+    window.print();
+  }
 }
+
+window.addEventListener('beforeprint', (e) => {
+  triggerPrint(e, true);
+});
 
 function exportSummaryToExcel(e) {
   if (e) {
@@ -1102,9 +1181,16 @@ function exportSummaryToExcel(e) {
 
   const monSelect = document.getElementById('month-select');
   const mon = monSelect ? monSelect.value : '';
-  const periodText = currentMode === 'year'
-    ? 'Full_Year'
-    : (mon && mon.includes('-') ? `${mon.split('-')[1]}_${mon.split('-')[0]}` : mon);
+  let periodText = '';
+  if (currentMode === 'year') {
+    periodText = 'Full_Year';
+  } else if (currentMode === 'custom') {
+    const fromVal = document.getElementById('custom-from').value;
+    const toVal   = document.getElementById('custom-to').value;
+    periodText = fromVal && toVal ? `${fromVal.replace(/-/g,'_')}_to_${toVal.replace(/-/g,'_')}` : 'Custom_Range';
+  } else {
+    periodText = (mon && mon.includes('-') ? `${mon.split('-')[1]}_${mon.split('-')[0]}` : mon);
+  }
 
   let excelRows, sheetName, fileName, colWidths;
 
@@ -1535,9 +1621,16 @@ function showTeamView() {
   const subset   = getSubset();
   const officers = aggregateOfficers(subset);
   const mon      = document.getElementById('month-select').value;
-  const label    = currentMode === 'year'
-    ? allMonths.map(m => m.split('-')[1] + '/' + m.split('-')[0]).join(' → ')
-    : (mon.includes('-') ? mon.split('-')[1] + '/' + mon.split('-')[0] : mon);
+  let label;
+  if (currentMode === 'year') {
+    label = allMonths.map(m => m.split('-')[1] + '/' + m.split('-')[0]).join(' → ');
+  } else if (currentMode === 'custom') {
+    const fromVal = document.getElementById('custom-from').value;
+    const toVal   = document.getElementById('custom-to').value;
+    label = fromVal && toVal ? `${formatDate(fromVal)} → ${formatDate(toVal)}` : 'Custom Range';
+  } else {
+    label = mon.includes('-') ? mon.split('-')[1] + '/' + mon.split('-')[0] : mon;
+  }
 
   document.getElementById('period-badge').textContent = label;
   document.getElementById('period-badge').style.display = 'inline-block';
