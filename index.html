@@ -496,9 +496,9 @@
 
     <div style="display:none; align-items:center; gap:8px;" id="period-custom-container">
       <label>From</label>
-      <input type="date" id="custom-from" onchange="renderView()" style="border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:.9rem;color:var(--text-primary);background:var(--bg-base);cursor:pointer;color-scheme:dark;">
+      <input type="month" id="custom-from" onchange="renderView()" style="border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:.9rem;color:var(--text-primary);background:var(--bg-base);cursor:pointer;color-scheme:dark;">
       <label style="margin-left:8px;">To</label>
-      <input type="date" id="custom-to" onchange="renderView()" style="border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:.9rem;color:var(--text-primary);background:var(--bg-base);cursor:pointer;color-scheme:dark;">
+      <input type="month" id="custom-to" onchange="renderView()" style="border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:.9rem;color:var(--text-primary);background:var(--bg-base);cursor:pointer;color-scheme:dark;">
     </div>
 
     <div style="display:flex; align-items:center; gap:8px;">
@@ -922,23 +922,11 @@ window.addEventListener('DOMContentLoaded', () => {
       }).join('');
       sel.value = allMonths[allMonths.length - 1];
 
-      // Set default custom date range: first and last challan dates in the latest month
-      const latestMon = allMonths[allMonths.length - 1];
-      const datesInLatestMon = rawData
-        .filter(r => r.monYear === latestMon && r.challanDate)
-        .map(r => r.challanDate)
-        .sort();
-      if (datesInLatestMon.length) {
-        document.getElementById('custom-from').value = datesInLatestMon[0];
-        document.getElementById('custom-to').value   = datesInLatestMon[datesInLatestMon.length - 1];
-      } else {
-        // fallback: first and last day of the latest month
-        const [yr, mo] = latestMon.split('-');
-        const firstDay = `${yr}-${mo}-01`;
-        const lastDay  = new Date(parseInt(yr), parseInt(mo), 0).toISOString().slice(0, 10);
-        document.getElementById('custom-from').value = firstDay;
-        document.getElementById('custom-to').value   = lastDay;
-      }
+      // Set default custom range to min and max monYear available in data
+      const minMon = allMonths[0] || '';
+      const maxMon = allMonths[allMonths.length - 1] || '';
+      document.getElementById('custom-from').value = minMon;
+      document.getElementById('custom-to').value   = maxMon;
 
       // Set last updated to the latest (max) Challan Date found in the data
       const maxChallanDate = rawData
@@ -1001,16 +989,16 @@ function renderView() {
 function getSubset() {
   if (currentMode === 'year') return rawData;
   if (currentMode === 'custom') {
-    const fromVal = document.getElementById('custom-from').value; // yyyy-mm-dd
+    const fromVal = document.getElementById('custom-from').value; // yyyy-mm
     const toVal   = document.getElementById('custom-to').value;
     if (!fromVal || !toVal) return rawData; // if either is empty, show all
     if (fromVal > toVal) {
-      showToast('Error: "From" date cannot be after "To" date. Please correct the range.');
+      showToast('Error: "From" month cannot be after "To" month. Please correct the range.');
       return [];
     }
     return rawData.filter(r => {
-      if (!r.challanDate) return false;
-      return r.challanDate >= fromVal && r.challanDate <= toVal;
+      if (!r.monYear) return false;
+      return r.monYear >= fromVal && r.monYear <= toVal;
     });
   }
   const mon = document.getElementById('month-select').value;
@@ -1140,7 +1128,7 @@ function triggerPrint(e, fromBeforePrint = false) {
   } else if (currentMode === 'custom') {
     const fromVal = document.getElementById('custom-from').value;
     const toVal   = document.getElementById('custom-to').value;
-    periodText = fromVal && toVal ? `${formatDate(fromVal)} to ${formatDate(toVal)}` : 'Custom Range';
+    periodText = fromVal && toVal ? `${fromVal} to ${toVal}` : 'Custom Range';
   } else {
     periodText = (mon && mon.includes('-') ? `Month: ${mon.split('-')[1]}/${mon.split('-')[0]}` : `Month: ${mon}`);
   }
@@ -1187,7 +1175,7 @@ function exportSummaryToExcel(e) {
   } else if (currentMode === 'custom') {
     const fromVal = document.getElementById('custom-from').value;
     const toVal   = document.getElementById('custom-to').value;
-    periodText = fromVal && toVal ? `${fromVal.replace(/-/g,'_')}_to_${toVal.replace(/-/g,'_')}` : 'Custom_Range';
+    periodText = fromVal && toVal ? `${fromVal}_to_${toVal}` : 'Custom_Range';
   } else {
     periodText = (mon && mon.includes('-') ? `${mon.split('-')[1]}_${mon.split('-')[0]}` : mon);
   }
